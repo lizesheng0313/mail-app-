@@ -21,7 +21,7 @@ jobs:
         include:
           - platform: macos-latest
             target: universal-apple-darwin
-            bundles: app,updater
+            bundles: dmg,updater
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
             bundles: nsis,updater
@@ -83,6 +83,7 @@ jobs:
         with:
           name: macos-artifacts
           path: |
+            mail_desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
             mail_desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
             mail_desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
@@ -146,7 +147,7 @@ jobs:
             ## 邮件管理客户端 v${{ github.event.inputs.version }}
 
             ### 下载
-            - **macOS**：下载 `.app.tar.gz` 文件
+            - **macOS**：下载 `.dmg` 文件
             - **Windows**：下载 `.exe` 文件
 
             ### 更新

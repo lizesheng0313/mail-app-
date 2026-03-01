@@ -22,6 +22,10 @@ echo "============================================"
 echo ""
 echo "[1/3] 从 GitHub Release 下载..."
 
+# macOS DMG 安装包
+echo "下载 macOS DMG 安装包..."
+gh release download "v${VERSION}" -R "$REPO" -p "*.dmg" -D "$TEMP_DIR" 2>/dev/null && echo "✅ macOS dmg" || echo "⚠️ macOS dmg 未找到"
+
 # macOS 更新包
 echo "下载 macOS 更新包..."
 gh release download "v${VERSION}" -R "$REPO" -p "*.app.tar.gz" -D "$TEMP_DIR" 2>/dev/null && echo "✅ macOS tar.gz" || echo "⚠️ macOS tar.gz 未找到"
@@ -40,6 +44,13 @@ ls -lh "$TEMP_DIR"
 # 2. SCP 上传到服务器
 echo ""
 echo "[2/3] 上传到服务器..."
+
+# macOS DMG 安装包
+DMG=$(find "$TEMP_DIR" -name "*.dmg" | head -1)
+if [ -n "$DMG" ]; then
+    scp "$DMG" ${SERVER_USER}@${SERVER_HOST}:${DOWNLOAD_PATH}/
+    echo "✅ macOS DMG 安装包已上传"
+fi
 
 # macOS 更新包
 TAR_GZ=$(find "$TEMP_DIR" -name "*.app.tar.gz" | head -1)

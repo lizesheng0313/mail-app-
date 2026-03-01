@@ -31,6 +31,7 @@ pipeline {
 
                     echo "📥 下载 v${params.VERSION} 的构建产物..."
 
+                    gh release download "v${params.VERSION}" -R "${REPO}" -p "*.dmg" -D release_artifacts || echo "⚠️ macOS dmg 未找到"
                     gh release download "v${params.VERSION}" -R "${REPO}" -p "*.app.tar.gz" -D release_artifacts || echo "⚠️ macOS tar.gz 未找到"
                     gh release download "v${params.VERSION}" -R "${REPO}" -p "*.app.tar.gz.sig" -D release_artifacts || echo "⚠️ macOS sig 未找到"
                     gh release download "v${params.VERSION}" -R "${REPO}" -p "*.exe" -D release_artifacts || echo "⚠️ Windows exe 未找到"
@@ -47,6 +48,13 @@ pipeline {
             steps {
                 sshagent(credentials: ['server-ssh-key']) {
                     sh """
+                        # macOS DMG 安装包
+                        DMG=\$(find release_artifacts -name "*.dmg" | head -1)
+                        if [ -n "\$DMG" ]; then
+                            scp -o StrictHostKeyChecking=no "\$DMG" ${SERVER_USER}@${SERVER_HOST}:${DOWNLOAD_PATH}/
+                            echo "✅ macOS DMG 安装包已上传"
+                        fi
+
                         # macOS 更新包
                         TAR_GZ=\$(find release_artifacts -name "*.app.tar.gz" | head -1)
                         if [ -n "\$TAR_GZ" ]; then
