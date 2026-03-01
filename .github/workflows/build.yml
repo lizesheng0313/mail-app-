@@ -138,6 +138,19 @@ jobs:
           name: windows-artifacts
           path: artifacts/windows
 
+      - name: Flatten artifacts
+        run: |
+          echo "=== 下载的原始结构 ==="
+          find artifacts -type f
+          # 把嵌套子目录里的文件移到顶层
+          find artifacts/macos -mindepth 2 -type f -exec mv {} artifacts/macos/ \;
+          find artifacts/windows -mindepth 2 -type f -exec mv {} artifacts/windows/ \;
+          # 清理空目录
+          find artifacts -type d -empty -delete 2>/dev/null || true
+          echo "=== 最终结构 ==="
+          ls -lh artifacts/macos/
+          ls -lh artifacts/windows/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
