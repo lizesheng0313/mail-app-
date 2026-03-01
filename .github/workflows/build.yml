@@ -138,15 +138,28 @@ jobs:
           name: windows-artifacts
           path: artifacts/windows
 
-      - name: Flatten artifacts
+      - name: Flatten and rename artifacts
+        env:
+          VERSION: ${{ github.event.inputs.version }}
         run: |
           echo "=== 下载的原始结构 ==="
           find artifacts -type f
           # 把嵌套子目录里的文件移到顶层
           find artifacts/macos -mindepth 2 -type f -exec mv {} artifacts/macos/ \;
           find artifacts/windows -mindepth 2 -type f -exec mv {} artifacts/windows/ \;
-          # 清理空目录
           find artifacts -type d -empty -delete 2>/dev/null || true
+
+          # 重命名为 ASCII 文件名（中文名上传 GitHub Release 会被截断）
+          cd artifacts/macos
+          for f in *.dmg; do [ -f "$f" ] && mv "$f" "${APP_NAME}_${VERSION}_universal.dmg"; done
+          for f in *.app.tar.gz; do [ -f "$f" ] && mv "$f" "${APP_NAME}.app.tar.gz"; done
+          for f in *.app.tar.gz.sig; do [ -f "$f" ] && mv "$f" "${APP_NAME}.app.tar.gz.sig"; done
+          cd ../windows
+          for f in *_x64-setup.exe; do [ -f "$f" ] && mv "$f" "${APP_NAME}_${VERSION}_x64-setup.exe"; done
+          for f in *_x64-setup.nsis.zip; do [ -f "$f" ] && mv "$f" "${APP_NAME}_${VERSION}_x64-setup.nsis.zip"; done
+          for f in *_x64-setup.nsis.zip.sig; do [ -f "$f" ] && mv "$f" "${APP_NAME}_${VERSION}_x64-setup.nsis.zip.sig"; done
+          cd ../..
+
           echo "=== 最终结构 ==="
           ls -lh artifacts/macos/
           ls -lh artifacts/windows/
