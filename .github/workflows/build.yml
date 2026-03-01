@@ -24,7 +24,7 @@ jobs:
             bundles: app,updater
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
-            bundles: msi,updater
+            bundles: nsis,updater
 
     runs-on: ${{ matrix.platform }}
 
@@ -92,9 +92,9 @@ jobs:
         with:
           name: windows-artifacts
           path: |
-            mail_desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-            mail_desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi.zip
-            mail_desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi.zip.sig
+            mail_desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            mail_desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip
+            mail_desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.nsis.zip.sig
 
   release:
     needs: build
@@ -123,7 +123,7 @@ jobs:
 
             ### 下载
             - **macOS**：下载 `.app.tar.gz` 文件
-            - **Windows**：下载 `.msi` 文件
+            - **Windows**：下载 `.exe` 文件
 
             ### 更新
             已安装 v${{ github.event.inputs.prev_version }} 的用户打开客户端会自动提示更新
