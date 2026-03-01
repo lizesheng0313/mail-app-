@@ -87,6 +87,7 @@ pipeline {
 
         stage('生成更新清单') {
             steps {
+                sshagent(credentials: ['server-ssh-key']) {
                 sh """
                     VERSION="${env.VERSION}"
                     PREV="${env.PREV_VERSION}"
@@ -119,6 +120,7 @@ pipeline {
                         echo "✅ Windows 更新清单（\${PREV} -> \${VERSION}）"
                     fi
                 """
+                }
             }
         }
     }
