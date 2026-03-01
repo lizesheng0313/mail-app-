@@ -156,8 +156,6 @@ jobs:
           VERSION="${{ github.event.inputs.version }}"
           PREV="${{ github.event.inputs.prev_version }}"
 
-          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} "mkdir -p ${{ env.DOWNLOAD_PATH }} ${{ env.UPDATE_PATH }}/darwin-aarch64 ${{ env.UPDATE_PATH }}/darwin-x86_64"
-
           # 上传 macOS 更新包
           TAR_GZ=$(find artifacts/macos -name "*.app.tar.gz" | head -1)
           SIG_FILE=$(find artifacts/macos -name "*.app.tar.gz.sig" | head -1)
