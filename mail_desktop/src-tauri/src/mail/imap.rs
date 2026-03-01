@@ -64,6 +64,7 @@ fn imap_login_sync(
             return Ok(LoginResult {
                 success: false,
                 message: msg,
+                protocol: Some("imap".to_string()),
                 host: Some(host.to_string()),
                 port: Some(port),
             });
@@ -77,6 +78,7 @@ fn imap_login_sync(
     Ok(LoginResult {
         success: true,
         message: "登录验证成功".to_string(),
+        protocol: Some("imap".to_string()),
         host: Some(host.to_string()),
         port: Some(port),
     })

@@ -6,7 +6,7 @@
   "identifier": "com.mailservice.desktop",
   "build": {
     "frontendDist": "../../mail_frontend/dist",
-    "devUrl": "http://localhost:9999",
+    "devUrl": "http://localhost:9998",
     "beforeDevCommand": "cd ../mail_frontend && pnpm dev",
     "beforeBuildCommand": "cd ../mail_frontend && pnpm build"
   },

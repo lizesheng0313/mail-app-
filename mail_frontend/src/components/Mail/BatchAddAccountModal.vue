@@ -63,12 +63,16 @@
               <div class="flex items-center gap-3">
                 <span class="text-sm text-gray-700 font-medium">协议：</span>
                 <label class="flex items-center text-sm cursor-pointer hover:text-primary-600 transition">
-                  <input type="radio" v-model="protocol" value="pop3" class="mr-1.5 w-4 h-4 text-primary-600">
-                  POP3
+                  <input type="radio" v-model="protocol" value="auto" class="mr-1.5 w-4 h-4 text-primary-600">
+                  自动
                 </label>
                 <label class="flex items-center text-sm cursor-pointer hover:text-primary-600 transition">
                   <input type="radio" v-model="protocol" value="imap" class="mr-1.5 w-4 h-4 text-primary-600">
                   IMAP
+                </label>
+                <label class="flex items-center text-sm cursor-pointer hover:text-primary-600 transition">
+                  <input type="radio" v-model="protocol" value="pop3" class="mr-1.5 w-4 h-4 text-primary-600">
+                  POP3
                 </label>
               </div>
               
@@ -127,7 +131,7 @@ const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits(['close', 'submit'])
 
 const accountsText = ref('')
-const protocol = ref('pop3')
+const protocol = ref('auto')
 const showCustomServer = ref(false)
 const customHost = ref('')
 const customPort = ref(995)
@@ -168,8 +172,8 @@ const parseAccounts = () => {
     // 去掉 "卡号：" 或 "卡号:" 前缀
     processedLine = processedLine.replace(/^卡号[：:]\s*/i, '')
 
-    // 支持：空格、----、Tab
-    const parts = processedLine.split(/[\s]+|----+/).filter(p => p.trim())
+    // 支持：空格、----、——（中文破折号）、—、Tab
+    const parts = processedLine.split(/[\s]+|[-]{2,}|[—–]+/).filter(p => p.trim())
 
     if (parts.length >= 2) {
       // 如果有3列或更多，第3列是授权码；否则第2列是授权码

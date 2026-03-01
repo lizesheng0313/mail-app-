@@ -1,7 +1,7 @@
 use crate::mail::types::{EmailData, FetchResult, LoginResult};
 use chrono::Utc;
 use log::{error, info};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net::TcpStream;
 
 /// POP3 登录验证
@@ -60,6 +60,7 @@ fn pop3_login_sync(
         return Ok(LoginResult {
             success: false,
             message: format!("服务器响应错误: {}", response),
+            protocol: Some("pop3".to_string()),
             host: Some(host.to_string()),
             port: Some(port),
         });
@@ -75,6 +76,7 @@ fn pop3_login_sync(
         return Ok(LoginResult {
             success: false,
             message: "用户名错误".to_string(),
+            protocol: Some("pop3".to_string()),
             host: Some(host.to_string()),
             port: Some(port),
         });
@@ -90,6 +92,7 @@ fn pop3_login_sync(
         return Ok(LoginResult {
             success: false,
             message: "邮箱或授权码错误，请检查后重试".to_string(),
+            protocol: Some("pop3".to_string()),
             host: Some(host.to_string()),
             port: Some(port),
         });
@@ -102,6 +105,7 @@ fn pop3_login_sync(
     Ok(LoginResult {
         success: true,
         message: "登录验证成功".to_string(),
+        protocol: Some("pop3".to_string()),
         host: Some(host.to_string()),
         port: Some(port),
     })
@@ -164,7 +168,8 @@ fn pop3_fetch_sync(
     let response = read_line(&mut tls_stream)?;
     
     if !response.starts_with("+OK") {
-        return Err("登录失败".to_string());
+        error!("POP3 登录失败，服务器响应: {}", response.trim());
+        return Err(format!("登录失败: {}", response.trim()));
     }
 
     // 获取邮件数量

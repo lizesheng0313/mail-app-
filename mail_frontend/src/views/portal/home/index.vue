@@ -300,15 +300,15 @@ import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import { showMessage } from '@/utils/message'
 import { isTauri, getServerUrl } from '@/services/api'
 
-// 条件导入 Tauri API（只在 Tauri 环境有效）
-let tauriInvoke: any = null
-if (isTauri()) {
-  import('@tauri-apps/api/core').then(module => {
-    tauriInvoke = module.invoke
-    console.log('✅ Tauri API 已加载')
-  }).catch(err => {
-    console.error('❌ Tauri API 加载失败:', err)
-  })
+// 获取 Tauri invoke（按需加载，避免竞态）
+async function getTauriInvoke() {
+  if (!isTauri()) return null
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke
+  } catch {
+    return null
+  }
 }
 import { unifiedAPI } from '@/api/unified'
 
@@ -503,10 +503,11 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
           // 桌面端：使用本地 IP 验证
           console.log('🟢 桌面端：使用本地 IP 验证邮箱')
           try {
+            const tauriInvoke = await getTauriInvoke()
             if (!tauriInvoke) {
               throw new Error('Tauri API 尚未加载，请稍后重试')
             }
-            
+
             // 调用 Tauri 命令验证邮箱
             const result = await tauriInvoke('add_external_mailbox', {
               email: accountData.email,
@@ -515,8 +516,22 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
               host: accountData.protocol === 'imap' ? accountData.imap_host : accountData.pop3_host,
               port: accountData.protocol === 'imap' ? accountData.imap_port : accountData.pop3_port
             })
-            
+
             console.log('✅ 本地验证成功:', result)
+
+            // 用 Tauri 返回的实际协议和服务器信息更新 accountData
+            if (result.protocol) {
+              accountData.protocol = result.protocol
+            }
+            if (result.host && result.port) {
+              if (accountData.protocol === 'imap') {
+                accountData.imap_host = result.host
+                accountData.imap_port = result.port
+              } else {
+                accountData.pop3_host = result.host
+                accountData.pop3_port = result.port
+              }
+            }
 
             // 验证成功，调用后端 API 保存到数据库（跳过服务器端验证）
             const response = await batchLoginAPI.addAccount({ ...accountData, skip_verify: true })
@@ -808,7 +823,8 @@ const fetchAllExternalEmails = async () => {
   fetchingExternalEmails.value = true
 
   try {
-    if (isTauri() && tauriInvoke) {
+    const tauriInvoke = await getTauriInvoke()
+    if (tauriInvoke) {
       // 桌面端：逐个邮箱本地收取
       const res = await batchLoginAPI.getAccounts(1, 100)
       const accountList = res.code === 0 ? (res.data?.accounts || []) : []
@@ -827,15 +843,14 @@ const fetchAllExternalEmails = async () => {
         try {
           const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
           const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
-          if (!host || !port) continue
 
           const result = await tauriInvoke('fetch_emails', {
             mailboxId: account.id,
             email: account.email,
             password: account.password,
             protocol: account.protocol,
-            host,
-            port,
+            host: host || null,
+            port: port || null,
             token,
             serverUrl
           })

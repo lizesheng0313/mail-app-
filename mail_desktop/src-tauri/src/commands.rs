@@ -42,6 +42,7 @@ pub struct ApiResponse<T> {
 
 /// 添加外部邮箱（验证登录）
 /// 前端调用：invoke('add_external_mailbox', { email, password, protocol, host?, port? })
+/// protocol: "imap" | "pop3" | "auto"（自动检测，先试IMAP再试POP3）
 #[tauri::command]
 pub async fn add_external_mailbox(
     email: String,
@@ -64,28 +65,49 @@ pub async fn add_external_mailbox(
         .nth(1)
         .ok_or("无效的邮箱地址")?;
 
-    // 确定服务器配置
-    let (final_host, final_port) = if let (Some(h), Some(p)) = (host.clone(), port) {
-        (h, p)
-    } else {
-        let config = get_server_config(domain)
-            .ok_or(format!("不支持的邮箱类型: {}，请使用自定义配置", domain))?;
-        
-        if protocol.to_lowercase() == "imap" {
-            (config.imap_host.to_string(), config.imap_port)
+    let proto = protocol.to_lowercase();
+
+    // 用户指定了自定义服务器
+    if let (Some(h), Some(p)) = (host.clone(), port) {
+        let result = if proto == "imap" {
+            mail::imap::verify_login(&email, &password, &h, p).await?
         } else {
-            (config.pop3_host.to_string(), config.pop3_port)
+            mail::pop3::verify_login(&email, &password, &h, p).await?
+        };
+        return Ok(result);
+    }
+
+    // 自动检测服务器配置
+    let config = get_server_config(domain)
+        .ok_or(format!("无法识别邮箱 {} 的服务器配置，请手动填写服务器地址", domain))?;
+
+    if proto == "auto" {
+        // 自动模式：先试 IMAP，失败再试 POP3
+        info!("自动检测协议：先尝试 IMAP {}:{}", config.imap_host, config.imap_port);
+        let imap_result = mail::imap::verify_login(&email, &password, config.imap_host, config.imap_port).await?;
+        if imap_result.success {
+            return Ok(imap_result);
         }
-    };
 
-    // 执行登录验证
-    let result = if protocol.to_lowercase() == "imap" {
-        mail::imap::verify_login(&email, &password, &final_host, final_port).await?
+        info!("IMAP 登录失败({}), 尝试 POP3 {}:{}", imap_result.message, config.pop3_host, config.pop3_port);
+        let pop3_result = mail::pop3::verify_login(&email, &password, config.pop3_host, config.pop3_port).await?;
+        if pop3_result.success {
+            return Ok(pop3_result);
+        }
+
+        // 两个都失败
+        Ok(LoginResult {
+            success: false,
+            message: format!("IMAP 和 POP3 均登录失败。IMAP: {}; POP3: {}", imap_result.message, pop3_result.message),
+            protocol: None,
+            host: None,
+            port: None,
+        })
+    } else if proto == "imap" {
+        Ok(mail::imap::verify_login(&email, &password, config.imap_host, config.imap_port).await?)
     } else {
-        mail::pop3::verify_login(&email, &password, &final_host, final_port).await?
-    };
-
-    Ok(result)
+        Ok(mail::pop3::verify_login(&email, &password, config.pop3_host, config.pop3_port).await?)
+    }
 }
 
 /// 获取本地出口 IP（用于验证）
@@ -107,25 +129,53 @@ async fn get_local_ip() -> Result<String, String> {
 }
 
 /// 收取邮件
-/// 前端调用：invoke('fetch_emails', { mailboxId, email, password, protocol, host, port, token })
+/// 前端调用：invoke('fetch_emails', { mailboxId, email, password, protocol, host?, port?, token, serverUrl })
 #[tauri::command]
 pub async fn fetch_emails(
     mailbox_id: i64,
     email: String,
     password: String,
     protocol: String,
-    host: String,
-    port: u16,
+    host: Option<String>,
+    port: Option<u16>,
     token: String,
     server_url: String,
 ) -> Result<FetchResult, String> {
-    info!("收到收取邮件请求: {} ({})", email, protocol);
+    // 自动检测服务器配置（当 host/port 缺失时）
+    let (final_host, final_port, final_protocol) = if let (Some(h), Some(p)) = (host.as_deref().filter(|s| !s.is_empty()), port) {
+        (h.to_string(), p, protocol.clone())
+    } else {
+        let domain = email.split('@').nth(1).ok_or("无效的邮箱地址")?;
+        let config = get_server_config(domain)
+            .ok_or(format!("无法识别邮箱 {} 的服务器配置", domain))?;
+
+        if protocol.to_lowercase() == "imap" || protocol.to_lowercase() == "auto" {
+            (config.imap_host.to_string(), config.imap_port, "imap".to_string())
+        } else {
+            (config.pop3_host.to_string(), config.pop3_port, "pop3".to_string())
+        }
+    };
+
+    info!("收到收取邮件请求: {} ({}) -> {}:{}", email, final_protocol, final_host, final_port);
+    info!("密码长度: {}, token长度: {}, serverUrl: {}", password.len(), token.len(), server_url);
 
     // 本地收取邮件
-    let result = if protocol.to_lowercase() == "imap" {
-        mail::imap::fetch_emails(&email, &password, &host, port, 50).await?
+    let result = if final_protocol.to_lowercase() == "imap" {
+        match mail::imap::fetch_emails(&email, &password, &final_host, final_port, 50).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!("IMAP 收取失败: {}", e);
+                return Err(e);
+            }
+        }
     } else {
-        mail::pop3::fetch_emails(&email, &password, &host, port, 50).await?
+        match mail::pop3::fetch_emails(&email, &password, &final_host, final_port, 50).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!("POP3 收取失败: {}", e);
+                return Err(e);
+            }
+        }
     };
 
     if result.success && !result.emails.is_empty() {

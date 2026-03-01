@@ -121,12 +121,15 @@ import { showMessage } from '@/utils/message'
 import { formatTimestamp } from '@/utils/timeUtils'
 import { isTauri, getServerUrl } from '@/services/api'
 
-// 条件导入 Tauri API
-let tauriInvoke: any = null
-if (isTauri()) {
-  import('@tauri-apps/api/core').then(module => {
-    tauriInvoke = module.invoke
-  }).catch(() => {})
+// 获取 Tauri invoke（按需加载，避免竞态）
+async function getTauriInvoke() {
+  if (!isTauri()) return null
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke
+  } catch {
+    return null
+  }
 }
 
 const emit = defineEmits<{
@@ -251,7 +254,8 @@ const fetchSingleMailbox = async (accountId: number) => {
   showMessage('正在收取邮件...', 'success')
 
   try {
-    if (isTauri() && tauriInvoke) {
+    const tauriInvoke = await getTauriInvoke()
+    if (tauriInvoke) {
       // 桌面端：本地收取
       const account = accounts.value.find((a: any) => a.id === accountId)
       if (!account) {
@@ -261,10 +265,6 @@ const fetchSingleMailbox = async (accountId: number) => {
 
       const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
       const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
-      if (!host || !port) {
-        showMessage('邮箱服务器配置缺失', 'error')
-        return
-      }
 
       const token = localStorage.getItem('token') || ''
       const serverUrl = getServerUrl()
@@ -274,8 +274,8 @@ const fetchSingleMailbox = async (accountId: number) => {
         email: account.email,
         password: account.password,
         protocol: account.protocol,
-        host,
-        port,
+        host: host || null,
+        port: port || null,
         token,
         serverUrl
       })
@@ -296,7 +296,7 @@ const fetchSingleMailbox = async (accountId: number) => {
       }
     }
   } catch (e: any) {
-    showMessage(e.message || '收取失败', 'error')
+    showMessage(typeof e === 'string' ? e : (e.message || '收取失败'), 'error')
     await loadAccounts()
   } finally {
     fetchingIds.value = fetchingIds.value.filter(id => id !== accountId)
