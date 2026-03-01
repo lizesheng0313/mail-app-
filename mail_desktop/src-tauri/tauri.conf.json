@@ -42,7 +42,7 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://zjkdongao.cn/desktop-updates/{{target}}-{{arch}}/{{current_version}}"
+        "https://zjkdongao.cn/desktop-updates/{{target}}-{{arch}}/latest"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA3QkNDQkE2MDQ2QkRBQzIKUldUQzJtc0Vwc3U4QjliR2NZSHJzL2R3Y0NjT1k1dDZHQmw3alorWnUyNG9Ec2VCQ2lvR1VEdUQK"
     }
