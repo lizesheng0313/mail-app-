@@ -18,9 +18,9 @@
               </svg>
             </div>
             <h2>macOS</h2>
-            <p class="version">版本 1.1.0</p>
+            <p class="version">版本 1.2.1</p>
             <a
-              href="https://zjkdongao.cn/downloads/mail-desktop_1.1.0_universal.dmg"
+              href="https://zjkdongao.cn/downloads/mail-desktop_1.2.1_universal.dmg"
               class="download-btn"
             >
               下载 macOS 版本
