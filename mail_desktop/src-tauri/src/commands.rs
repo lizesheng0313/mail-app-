@@ -149,7 +149,7 @@ async fn sync_emails_to_server(
     info!("同步 {} 封邮件到服务器", emails.len());
 
     let client = reqwest::Client::new();
-    let url = format!("{}/api/unified/external-emails/sync", server_url);
+    let url = format!("{}/unified-emails/external-emails/sync", server_url);
 
     let request_body = SyncEmailsRequest {
         mailbox_id,

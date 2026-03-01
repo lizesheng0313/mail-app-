@@ -45,6 +45,9 @@ const getBaseURL = () => {
 // 导出 isTauri 供其他地方使用
 export { isTauri }
 
+// 获取服务器基础URL（供 Tauri 命令使用）
+export const getServerUrl = () => getBaseURL()
+
 // 系统维护状态管理
 let maintenanceCallback: (() => void) | null = null
 let errorCount = 0

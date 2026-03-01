@@ -298,7 +298,7 @@ import ActionButton from '@/components/ActionButton/index.vue'
 import ConfirmDialog from '@/components/ConfirmDialog/index.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import { showMessage } from '@/utils/message'
-import { isTauri } from '@/services/api'
+import { isTauri, getServerUrl } from '@/services/api'
 
 // 条件导入 Tauri API（只在 Tauri 环境有效）
 let tauriInvoke: any = null
@@ -808,17 +808,60 @@ const fetchAllExternalEmails = async () => {
   fetchingExternalEmails.value = true
 
   try {
-    const result = await batchLoginAPI.fetchAll()
+    if (isTauri() && tauriInvoke) {
+      // 桌面端：逐个邮箱本地收取
+      const res = await batchLoginAPI.getAccounts(1, 100)
+      const accountList = res.code === 0 ? (res.data?.accounts || []) : []
+      if (accountList.length === 0) {
+        showMessage('暂无外部邮箱', 'error')
+        fetchingExternalEmails.value = false
+        return
+      }
 
-    // 检查返回结果
-    if (result.code !== 0) {
-      showMessage(result.message || '收取失败', 'error')
-      fetchingExternalEmails.value = false
-      return
+      let totalNew = 0
+      let failCount = 0
+      const token = localStorage.getItem('token') || ''
+      const serverUrl = getServerUrl()
+
+      for (const account of accountList) {
+        try {
+          const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
+          const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
+          if (!host || !port) continue
+
+          const result = await tauriInvoke('fetch_emails', {
+            mailboxId: account.id,
+            email: account.email,
+            password: account.password,
+            protocol: account.protocol,
+            host,
+            port,
+            token,
+            serverUrl
+          })
+          totalNew += result.count || 0
+        } catch (e: any) {
+          console.error(`收取 ${account.email} 失败:`, e)
+          failCount++
+        }
+      }
+
+      if (failCount === 0) {
+        showMessage(`收取成功，共新增 ${totalNew} 封邮件`, 'success')
+      } else {
+        showMessage(`收取完成，新增 ${totalNew} 封，${failCount} 个邮箱失败`, 'warning')
+      }
+    } else {
+      // Web 端：调用后端接口
+      const result = await batchLoginAPI.fetchAll()
+      if (result.code !== 0) {
+        showMessage(result.message || '收取失败', 'error')
+        fetchingExternalEmails.value = false
+        return
+      }
+      showMessage(result.message || '收取成功', 'success')
     }
 
-    showMessage(result.message || '收取成功', 'success')
-    
     // 收取成功后立即刷新邮件列表
     if (selectedExternalMailboxId.value) {
       // 如果选中了特定邮箱，刷新该邮箱的邮件
@@ -828,7 +871,7 @@ const fetchAllExternalEmails = async () => {
       // 否则刷新所有外部邮件
       await loadAllExternalEmails()
     }
-    
+
     // 刷新邮箱列表状态
     if (externalMailboxListRef.value?.loadAccounts) {
       await externalMailboxListRef.value.loadAccounts()

@@ -119,6 +119,15 @@ import { batchLoginAPI } from '@/api/batchLogin'
 import { unifiedAPI } from '@/api/unified'
 import { showMessage } from '@/utils/message'
 import { formatTimestamp } from '@/utils/timeUtils'
+import { isTauri, getServerUrl } from '@/services/api'
+
+// 条件导入 Tauri API
+let tauriInvoke: any = null
+if (isTauri()) {
+  import('@tauri-apps/api/core').then(module => {
+    tauriInvoke = module.invoke
+  }).catch(() => {})
+}
 
 const emit = defineEmits<{
   'select': [id: number]
@@ -236,27 +245,58 @@ const fetchSingleMailbox = async (accountId: number) => {
   if (fetchingIds.value.includes(accountId)) {
     return
   }
-  
+
   // 立即显示收取中状态
   fetchingIds.value.push(accountId)
   showMessage('正在收取邮件...', 'success')
-  
+
   try {
-    const res = await batchLoginAPI.fetchSingle(accountId)
-    if (res.code === 0) {
-      showMessage(res.message || '收取成功', 'success')
-      // 刷新邮箱状态
+    if (isTauri() && tauriInvoke) {
+      // 桌面端：本地收取
+      const account = accounts.value.find((a: any) => a.id === accountId)
+      if (!account) {
+        showMessage('邮箱不存在', 'error')
+        return
+      }
+
+      const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
+      const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
+      if (!host || !port) {
+        showMessage('邮箱服务器配置缺失', 'error')
+        return
+      }
+
+      const token = localStorage.getItem('token') || ''
+      const serverUrl = getServerUrl()
+
+      const result = await tauriInvoke('fetch_emails', {
+        mailboxId: account.id,
+        email: account.email,
+        password: account.password,
+        protocol: account.protocol,
+        host,
+        port,
+        token,
+        serverUrl
+      })
+
+      showMessage(`收取成功，新增 ${result.count || 0} 封邮件`, 'success')
       await loadAccounts()
-      // 通知父组件刷新邮件列表（重要：收取成功后必须刷新邮件列表）
       emit('refresh')
     } else {
-      showMessage(res.message || '收取失败', 'error')
-      // 刷新邮箱状态
-      await loadAccounts()
+      // Web 端：调用后端接口
+      const res = await batchLoginAPI.fetchSingle(accountId)
+      if (res.code === 0) {
+        showMessage(res.message || '收取成功', 'success')
+        await loadAccounts()
+        emit('refresh')
+      } else {
+        showMessage(res.message || '收取失败', 'error')
+        await loadAccounts()
+      }
     }
   } catch (e: any) {
     showMessage(e.message || '收取失败', 'error')
-    // 刷新邮箱状态
     await loadAccounts()
   } finally {
     fetchingIds.value = fetchingIds.value.filter(id => id !== accountId)
