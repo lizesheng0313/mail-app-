@@ -1,0 +1,208 @@
+import axios from 'axios'
+import { showMessage } from '@/utils/message'
+
+// 检测是否在 Tauri 环境
+const isTauri = () => {
+  // Tauri v2: 检查 __TAURI_INTERNALS__ 或 __TAURI__
+  // Tauri v1: 检查 __TAURI__
+  // 同时检查 URL 协议（tauri:// 或 https://tauri.localhost）
+  const hasTauriGlobal = '__TAURI__' in window || '__TAURI_INTERNALS__' in window
+  const isTauriProtocol = window.location.protocol === 'tauri:' ||
+    window.location.hostname === 'tauri.localhost' ||
+    window.location.hostname === 'localhost' && window.location.port === ''
+  return hasTauriGlobal || isTauriProtocol
+}
+
+// 根据环境确定 API 基础地址
+const getBaseURL = () => {
+  const tauriEnv = isTauri()
+  const isDev = import.meta.env.DEV
+  
+  console.log('🔍 环境检测:', {
+    isTauri: tauriEnv,
+    isDev: isDev,
+    protocol: window.location.protocol,
+    hostname: window.location.hostname,
+    hasTauriGlobal: '__TAURI__' in window || '__TAURI_INTERNALS__' in window
+  })
+
+  if (tauriEnv) {
+    // Tauri 桌面端
+    if (isDev) {
+      // 开发模式：使用本地后端
+      const localApi = 'http://localhost:8088/mail-api/v1'
+      console.log('🔧 Tauri 开发模式，使用本地 API:', localApi)
+      return localApi
+    } else {
+      // 生产模式：使用线上服务器
+      return 'https://zjkdongao.cn/mail-api/v1'
+    }
+  }
+  // Web 端：使用相对路径（通过 nginx 代理）
+  return '/mail-api/v1'
+}
+
+// 导出 isTauri 供其他地方使用
+export { isTauri }
+
+// 系统维护状态管理
+let maintenanceCallback: (() => void) | null = null
+let errorCount = 0
+let lastErrorTime = 0
+const ERROR_THRESHOLD = 3 // 连续错误次数阈值
+const ERROR_TIME_WINDOW = 10000 // 10秒内的错误计数
+
+// 注册维护回调
+export const registerMaintenanceCallback = (callback: () => void) => {
+  maintenanceCallback = callback
+}
+
+// 重置错误计数
+const resetErrorCount = () => {
+  errorCount = 0
+  lastErrorTime = 0
+}
+
+// 检查是否需要显示维护页面
+const checkMaintenance = () => {
+  const now = Date.now()
+
+  // 如果距离上次错误超过时间窗口，重置计数
+  if (now - lastErrorTime > ERROR_TIME_WINDOW) {
+    errorCount = 1
+  } else {
+    errorCount++
+  }
+
+  lastErrorTime = now
+
+  // 如果连续错误超过阈值，显示维护页面
+  if (errorCount >= ERROR_THRESHOLD && maintenanceCallback) {
+    maintenanceCallback()
+    resetErrorCount() // 显示后重置计数，避免重复触发
+  }
+}
+
+// 创建 axios 实例
+const api = axios.create({
+  baseURL: getBaseURL(),
+  timeout: 300000,  // 5分钟超时
+  headers: {
+    'Content-Type': 'application/json'
+  }
+})
+
+// 请求拦截器
+api.interceptors.request.use(
+  (config) => {
+    // 添加授权头
+    const token = localStorage.getItem('token')
+    if (token) {
+      if (!config.headers) {
+        config.headers = {} as any
+      }
+      config.headers['Authorization'] = `Bearer ${token}`
+    }
+    
+    // 详细日志
+    console.log('📤 API 请求:', {
+      url: config.url,
+      baseURL: config.baseURL,
+      fullURL: `${config.baseURL}${config.url}`,
+      method: config.method,
+      hasToken: !!token
+    })
+    
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+// 响应拦截器
+api.interceptors.response.use(
+  (response) => {
+    const data = response.data
+
+    // 请求成功，重置错误计数
+    resetErrorCount()
+
+    // 不再处理业务层面的 401，让各个页面自己处理
+    // 这样可以避免误判导致退出登录
+
+    // 统一处理业务错误：只要 code !== 0 就显示错误消息
+    if (data.code !== 0) {
+      showMessage(data.message || '操作失败', 'error')
+    }
+
+    // 直接返回后端数据，保持 {code: 0, message: "", data: []} 格式
+    return data
+  },
+  (error) => {
+    console.log('🔴 API 错误详情:', {
+      url: error.config?.url,
+      baseURL: error.config?.baseURL,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      hasToken: !!localStorage.getItem('token'),
+      errorMessage: error.message,
+      errorCode: error.code,
+      responseData: error.response?.data
+    })
+
+    // 401错误不计入维护检测
+    if (error.response?.status === 401) {
+      // 未授权，清除本地存储并跳转到登录页
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      localStorage.removeItem('isAuthenticated')
+
+      showMessage('登录已过期，请重新登录', 'error')
+
+      // 刷新页面并跳转到登录页
+      setTimeout(() => {
+        window.location.href = '/login'
+      }, 500)
+
+      return Promise.reject({
+        response: {
+          data: {
+            code: 1,
+            message: '未授权，请重新登录',
+            data: null
+          }
+        }
+      })
+    }
+
+    // 检测500/502/503等服务器错误
+    const status = error.response?.status
+    if (status && (status >= 500 || status === 502 || status === 503 || status === 504)) {
+      checkMaintenance()
+    }
+
+    // 网络完全不通（如服务器宕机）
+    if (!error.response && error.code === 'ERR_NETWORK') {
+      checkMaintenance()
+    }
+
+    // 处理HTTP错误状态码，返回统一格式
+    const errorMessage = error.response?.data?.message || error.response?.data?.detail || '网络错误，请稍后重试'
+
+    // 显示网络错误
+    showMessage(errorMessage, 'error')
+
+    return Promise.reject({
+      response: {
+        data: {
+          code: 1,
+          message: errorMessage,
+          data: null
+        }
+      }
+    })
+  }
+)
+
+export default api

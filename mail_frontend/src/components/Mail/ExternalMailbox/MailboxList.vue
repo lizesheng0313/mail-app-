@@ -1,0 +1,308 @@
+<template>
+
+  <MailboxList
+    ref="mailboxListRef"
+    title="第三方邮箱"
+    :mailboxes="accounts"
+    :selectedId="selectedId"
+    :showPagination="true"
+    @select="$emit('select', $event)"
+    @batch-delete="handleBatchDelete"
+    @batch-share="handleBatchShare"
+  >
+    <template #pagination>
+      <Pagination
+        :current-page="currentPage"
+        :total-pages="totalPages"
+        :total="totalAccounts"
+        @page-change="loadAccounts"
+      />
+    </template>
+    <template #content="{ mailboxes, selectedId, batchMode, selectedIds, toggleSelection, onSelect }">
+      <div
+        v-for="account in mailboxes"
+        :key="account.id"
+        class="group p-3 bg-gray-50 rounded-lg hover:bg-primary-100 cursor-pointer"
+        :class="{ 'bg-primary-100': selectedId === account.id || (batchMode && selectedIds.includes(account.id)) }"
+        @click="batchMode ? toggleSelection(account.id) : onSelect(account)"
+      >
+        <div class="flex items-center justify-between">
+          <div class="flex items-center flex-1 min-w-0">
+            <input
+              v-if="batchMode"
+              type="checkbox"
+              :checked="selectedIds.includes(account.id)"
+              @change.stop="toggleSelection(account.id)"
+              class="w-4 h-4 mr-3 cursor-pointer flex-shrink-0"
+            />
+            <div class="flex-1">
+              <div class="flex items-center gap-2">
+                <span 
+                  v-if="account.status === 'active'"
+                  class="w-2 h-2 rounded-full flex-shrink-0 bg-green-500"
+                  title="🟢 在线"
+                ></span>
+                <span 
+                  v-else-if="account.status === 'failed'"
+                  class="w-2 h-2 rounded-full flex-shrink-0 bg-red-500"
+                  :title="'🔴 连接失败' + (account.error_message ? ': ' + account.error_message : '')"
+                ></span>
+                <span 
+                  v-else
+                  class="w-2 h-2 rounded-full flex-shrink-0 bg-gray-400"
+                  title="⚪ 已禁用"
+                ></span>
+                <code class="text-sm truncate" :class="account.status === 'failed' ? 'text-red-600' : 'text-black'">
+                  {{ account.email }}
+                </code>
+              </div>
+              <p class="text-xs mt-1" :class="account.status === 'failed' ? 'text-red-500' : 'text-gray-600'">
+                <span v-if="account.status === 'failed' && account.error_message">
+                  ❌ {{ account.error_message }}
+                </span>
+                <span v-else>
+                  更新：{{ (account.last_sync_at || account.created_at) ? formatDate(account.last_sync_at || account.created_at) : '未收取' }}
+                </span>
+              </p>
+            </div>
+          </div>
+          <div v-if="!batchMode" class="ml-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1 flex-shrink-0">
+            <ActionButton
+              icon="copy"
+              variant="copy"
+              tooltip="复制邮箱"
+              @click.stop="copy(account.email)"
+            />
+            <ActionButton
+              icon="share"
+              variant="primary"
+              tooltip="分享邮箱"
+              @click.stop="handleShare(account)"
+            />
+            <ActionButton
+              icon="delete"
+              variant="delete"
+              tooltip="删除账号"
+              @click.stop="handleDelete(account.id)"
+            />
+            <ActionButton
+              icon="refresh"
+              variant="primary"
+              :tooltip="fetchingIds.includes(account.id) ? '收取中...' : '收取邮件'"
+              :disabled="fetchingIds.includes(account.id)"
+              :class="{ 'animate-spin': fetchingIds.includes(account.id) }"
+              @click.stop="fetchSingleMailbox(account.id)"
+            />
+          </div>
+        </div>
+      </div>
+    </template>
+  </MailboxList>
+
+  <ConfirmDialog
+    :visible="showConfirm"
+    :title="isDeleting.batch ? '批量删除' : '删除账号'"
+    :message="isDeleting.batch ? `确定删除 ${isDeleting.ids.length} 个账号？` : '确定删除这个账号？'"
+    :loading="deleting"
+    @confirm="confirmDelete"
+    @cancel="showConfirm = false"
+  />
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import MailboxList from '@/components/Mail/MailboxList/MailboxList.vue'
+import Pagination from '@/components/Pagination/index.vue'
+import ActionButton from '@/components/ActionButton/index.vue'
+import ConfirmDialog from '@/components/ConfirmDialog/index.vue'
+import { batchLoginAPI } from '@/api/batchLogin'
+import { unifiedAPI } from '@/api/unified'
+import { showMessage } from '@/utils/message'
+import { formatTimestamp } from '@/utils/timeUtils'
+
+const emit = defineEmits<{
+  'select': [id: number]
+  'refresh': []
+  'share': [mailboxes: any[]]
+}>()
+
+const accounts = ref([])
+const showConfirm = ref(false)
+const deleting = ref(false)
+const isDeleting = ref({ batch: false, ids: [] as number[] })
+const selectedId = ref<number | null>(null)
+const fetchingIds = ref<number[]>([])
+const mailboxListRef = ref()
+
+// 分页数据
+const currentPage = ref(1)
+const totalPages = ref(1)
+const totalAccounts = ref(0)
+
+const formatDate = (date: string | number) => {
+  if (!date) return '未知'
+  const timestamp = typeof date === 'number' ? date : new Date(date).getTime()
+  if (isNaN(timestamp)) return '未知'
+  return formatTimestamp(timestamp, 'datetime')
+}
+
+const loadAccounts = async (page = 1) => {
+  try {
+    const res = await batchLoginAPI.getAccounts(page, 20)
+    
+    if (res.code === 0) {
+      // 确保是数组：如果 res.data 是对象，提取 accounts 数组
+      const data = res.data || []
+      accounts.value = Array.isArray(data) ? data : (data.accounts || [])
+      
+      // 处理分页信息
+      if (data.pagination) {
+        currentPage.value = data.pagination.current_page || page
+        totalPages.value = data.pagination.total_pages || 1
+        totalAccounts.value = data.pagination.total || accounts.value.length
+      } else if (data.total) {
+        totalAccounts.value = data.total
+        totalPages.value = Math.ceil(data.total / 20)
+        currentPage.value = page
+      } else {
+        totalAccounts.value = accounts.value.length
+        totalPages.value = 1
+        currentPage.value = 1
+      }
+    } else {
+      console.error('❌ API返回错误:', res.message)
+    }
+  } catch (e) {
+    console.error('❌ 加载外部邮箱失败', e)
+  }
+}
+
+const handleDelete = (id: number) => {
+  isDeleting.value = { batch: false, ids: [id] }
+  showConfirm.value = true
+}
+
+const handleShare = (account: any) => {
+  emit('share', [account])
+}
+
+const handleBatchDelete = (ids: number[]) => {
+  console.log('🟢 外部邮箱组件 - handleBatchDelete 被调用')
+  console.log('🟢 接收到的 ids:', ids)
+  console.log('🟢 ids 类型:', typeof ids)
+  console.log('🟢 ids 是数组吗:', Array.isArray(ids))
+  if (!ids || ids.length === 0) {
+    console.warn('⚠️ 外部邮箱组件 - ids 为空或长度为0')
+    showMessage('请先选择要删除的邮箱', 'warning')
+    return
+  }
+  console.log('🟢 准备显示确认对话框')
+  isDeleting.value = { batch: true, ids }
+  showConfirm.value = true
+  console.log('🟢 showConfirm 设置为:', showConfirm.value)
+}
+
+const handleBatchShare = (ids: number[]) => {
+  console.log('🟢 外部邮箱 - 批量分享，ids:', ids)
+  // 获取选中的邮箱对象
+  const selectedAccounts = accounts.value.filter(a => ids.includes(a.id))
+  emit('share', selectedAccounts)
+}
+
+const copy = (text: string) => {
+  navigator.clipboard.writeText(text)
+  showMessage('已复制', 'success')
+}
+
+const confirmDelete = async () => {
+  deleting.value = true
+  try {
+    await Promise.all(
+      isDeleting.value.ids.map(id => unifiedAPI.deleteMailbox(id, 'external'))
+    )
+    showMessage(`已删除 ${isDeleting.value.ids.length} 个账号`)
+    await loadAccounts()
+  } catch (e: any) {
+    showMessage(e.message || '删除失败', 'error')
+  } finally {
+    deleting.value = false
+    showConfirm.value = false
+  }
+}
+
+// 收取单个邮箱的邮件
+const fetchSingleMailbox = async (accountId: number) => {
+  // 防止重复点击
+  if (fetchingIds.value.includes(accountId)) {
+    return
+  }
+  
+  // 立即显示收取中状态
+  fetchingIds.value.push(accountId)
+  showMessage('正在收取邮件...', 'success')
+  
+  try {
+    const res = await batchLoginAPI.fetchSingle(accountId)
+    if (res.code === 0) {
+      showMessage(res.message || '收取成功', 'success')
+      // 刷新邮箱状态
+      await loadAccounts()
+      // 通知父组件刷新邮件列表（重要：收取成功后必须刷新邮件列表）
+      emit('refresh')
+    } else {
+      showMessage(res.message || '收取失败', 'error')
+      // 刷新邮箱状态
+      await loadAccounts()
+    }
+  } catch (e: any) {
+    showMessage(e.message || '收取失败', 'error')
+    // 刷新邮箱状态
+    await loadAccounts()
+  } finally {
+    fetchingIds.value = fetchingIds.value.filter(id => id !== accountId)
+  }
+}
+
+// 暴露加载方法给父组件调用（不要在onMounted自动加载）
+defineExpose({
+  loadAccounts,
+  cancelBatchMode: () => {
+    console.log('🔵 外部邮箱组件 - cancelBatchMode 被调用')
+    if (mailboxListRef.value?.cancelBatchMode) {
+      mailboxListRef.value.cancelBatchMode()
+    }
+  }
+})
+</script>
+
+<style scoped>
+/* 自定义 checkbox 样式 */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #d1d5db;
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+  background-color: white;
+}
+
+input[type="checkbox"]:checked {
+  background-color: #22c55e;
+  border-color: #22c55e;
+}
+
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+</style>

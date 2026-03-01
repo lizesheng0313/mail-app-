@@ -1,0 +1,672 @@
+<template>
+  <div class="min-h-screen bg-gray-50">
+    <!-- 顶部导航 -->
+    <PageHeader />
+    
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <!-- 加载状态 -->
+      <div v-if="loading" class="text-center py-12">
+        <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+        <p class="mt-4 text-gray-600">加载中...</p>
+      </div>
+
+      <!-- 工作流详情 -->
+      <div v-else-if="workflow" class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- 左侧：主要内容 -->
+        <div class="lg:col-span-2 space-y-6">
+          <!-- 基本信息卡片 -->
+          <div class="bg-white rounded-lg shadow p-6">
+            <!-- 图标 + 标题 + 作者 -->
+            <div class="flex gap-4 mb-6">
+              <!-- 工作流图标 - 默认图标使用主题色 -->
+              <div class="w-20 h-20 rounded-lg flex-shrink-0 flex items-center justify-center" :class="workflow.icon_url ? '' : 'bg-gradient-workflow'">
+                <img 
+                  v-if="workflow.icon_url" 
+                  :src="workflow.icon_url" 
+                  class="w-full h-full rounded-lg object-cover"
+                  :alt="workflow.name"
+                  @error="$event.target.style.display='none'"
+                />
+                <svg v-if="!workflow.icon_url" class="w-10 h-10 text-white opacity-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <div class="flex-1">
+                <h1 class="text-2xl font-bold text-gray-900 mb-2">{{ workflow.name }}</h1>
+                <div class="flex items-center gap-4 text-sm text-gray-600">
+                  <span>作者: {{ workflow.author_name || 'Admin' }}</span>
+                  <span>·</span>
+                  <span>分类: {{ getCategoryText(workflow.category) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 简短描述 -->
+            <p class="text-gray-700 mb-4">{{ workflow.description }}</p>
+
+            <!-- 标签 -->
+            <div v-if="workflow.keywords && workflow.keywords.length > 0" class="flex flex-wrap gap-2">
+              <span
+                v-for="keyword in workflow.keywords"
+                :key="keyword"
+                class="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded-full"
+              >
+                {{ keyword }}
+              </span>
+            </div>
+          </div>
+
+          <!-- 截图预览 - 只在有截图时显示 -->
+          <div v-if="hasValidScreenshots" class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-semibold mb-4">截图预览</h3>
+            <div class="grid grid-cols-2 gap-4">
+              <img
+                v-for="(screenshot, index) in validScreenshots"
+                :key="index"
+                :src="screenshot"
+                :alt="`截图 ${index + 1}`"
+                class="w-full rounded-lg border border-gray-200 cursor-pointer hover:opacity-90 transition-opacity"
+                @click="viewImage(screenshot)"
+                @error="handleImageError($event, index)"
+              />
+            </div>
+          </div>
+
+          <!-- 详细说明 -->
+          <div v-if="workflow.long_description" class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-semibold mb-4">详细说明</h3>
+            <div class="prose max-w-none" v-html="workflow.long_description"></div>
+          </div>
+
+          <!-- 用户评价 -->
+          <div class="bg-white rounded-lg shadow p-6">
+            <h3 class="text-lg font-semibold mb-6">用户评价 ({{ workflow.review_count || 0 }})</h3>
+
+            <!-- 评论输入框 - 始终显示 -->
+            <div class="mb-6">
+              <div class="flex items-start gap-3">
+                <div class="w-10 h-10 rounded-full bg-gradient-workflow flex items-center justify-center text-white font-semibold">
+                  {{ userStore.user?.username?.charAt(0)?.toUpperCase() || 'U' }}
+                </div>
+                <div class="flex-1">
+                  <textarea
+                    v-model="newComment"
+                    rows="3"
+                    :placeholder="canReview ? '分享你的使用体验...' : '只有购买并使用过这个工作流才能评论'"
+                    :disabled="!canReview"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+                    :class="!canReview ? 'bg-gray-50 cursor-not-allowed' : ''"
+                  ></textarea>
+                  <div class="flex items-center justify-between mt-2">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm text-gray-600">评分：</span>
+                      <div class="flex gap-1">
+                        <button
+                          v-for="i in 5"
+                          :key="i"
+                          @click="canReview && (newRating = i)"
+                          :disabled="!canReview"
+                          class="focus:outline-none"
+                        >
+                          <svg :class="i <= newRating ? 'text-yellow-400' : 'text-gray-300'" class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      @click="submitReview"
+                      :disabled="!canReview || !newComment.trim()"
+                      class="px-4 py-2 bg-primary-600 text-white text-sm rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      发表评价
+                    </button>
+                  </div>
+                  <p v-if="!canReview" class="text-xs text-amber-600 mt-2">
+                    💡 提示：您需要先购买并使用这个工作流才能发表评价
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- 评价列表 -->
+            <div v-if="reviews && reviews.length > 0" class="space-y-4">
+              <div v-for="review in reviews" :key="review.id" class="border-b border-gray-200 pb-4 last:border-0">
+                <div class="flex items-start gap-3">
+                  <!-- 评论者头像 -->
+                  <div class="w-10 h-10 rounded-full bg-gradient-workflow flex items-center justify-center text-white font-semibold flex-shrink-0">
+                    {{ review.user_name?.charAt(0)?.toUpperCase() || 'U' }}
+                  </div>
+                  <div class="flex-1">
+                    <div class="flex items-center justify-between mb-2">
+                      <div class="flex items-center gap-2">
+                        <span class="font-medium text-gray-900">{{ review.user_name || '匿名用户' }}</span>
+                        <!-- 作者标识 -->
+                        <span v-if="review.user_id === workflow.author_id" class="px-2 py-0.5 text-xs bg-primary-100 text-primary-600 rounded">作者</span>
+                        <div v-if="review.rating" class="flex">
+                          <svg v-for="i in 5" :key="i" :class="i <= review.rating ? 'text-yellow-400' : 'text-gray-300'" class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm text-gray-500">{{ formatDate(review.created_at) }}</span>
+                        <!-- 删除按钮 - 只有自己能删除自己的评论 -->
+                        <ActionButton
+                          v-if="review.user_id === userStore.user?.id"
+                          icon="delete"
+                          variant="delete"
+                          size="sm"
+                          tooltip="删除评论"
+                          @click="deleteReviewById(review.id)"
+                        />
+                      </div>
+                    </div>
+                    <p class="text-gray-700">{{ review.comment }}</p>
+                    
+                    <!-- 回复按钮 -->
+                    <button
+                      v-if="canReview"
+                      @click="replyToReview(review)"
+                      class="mt-2 text-sm text-primary-600 hover:text-primary-700"
+                    >
+                      回复
+                    </button>
+                    
+                    <!-- 子评论（回复） -->
+                    <div v-if="review.replies && review.replies.length > 0" class="mt-3 ml-8 space-y-3">
+                      <div v-for="reply in review.replies" :key="reply.id" class="border-l-2 border-gray-200 pl-4">
+                        <div class="flex items-center justify-between mb-1">
+                          <div class="flex items-center gap-2">
+                            <span class="font-medium text-gray-900 text-sm">{{ reply.user_name || '匿名用户' }}</span>
+                            <!-- 作者标识 -->
+                            <span v-if="reply.user_id === workflow.author_id" class="px-2 py-0.5 text-xs bg-primary-100 text-primary-600 rounded">作者</span>
+                            <span class="text-xs text-gray-500">{{ formatDate(reply.created_at) }}</span>
+                          </div>
+                          <!-- 删除回复按钮 -->
+                          <ActionButton
+                            v-if="reply.user_id === userStore.user?.id"
+                            icon="delete"
+                            variant="delete"
+                            size="xs"
+                            tooltip="删除回复"
+                            @click="deleteReviewById(reply.id)"
+                          />
+                        </div>
+                        <p class="text-gray-700 text-sm">{{ reply.comment }}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="text-center py-8 text-gray-500">
+              暂无评价
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧：购买面板 -->
+        <div class="lg:col-span-1">
+          <div class="bg-white rounded-lg shadow p-6 sticky top-24 space-y-3">
+            <!-- 立即执行按钮 -->
+            <button
+              @click="executeNow"
+              :disabled="workflow.inventory_enabled && workflow.inventory_count <= 0"
+              class="w-full px-6 py-3 bg-primary-600 text-white text-base font-medium rounded-lg hover:bg-primary-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            >
+              <span v-if="workflow.inventory_enabled && workflow.inventory_count <= 0">
+                库存已耗尽
+              </span>
+              <span v-else-if="workflow.pricing_model === 'free'">
+                立即执行（免费）
+              </span>
+              <span v-else-if="workflow.pricing_model === 'per_use'">
+                立即执行（{{ workflow.milk_coin_price }} 奶片/次）
+              </span>
+              <span v-else-if="workflow.pricing_model === 'subscription'">
+                立即执行（订阅后免费）
+              </span>
+              <span v-else>
+                立即执行（{{ workflow.milk_coin_price }} 奶片）
+              </span>
+            </button>
+
+            <!-- 执行历史按钮 - 所有登录用户都能看到 -->
+            <button
+              @click="showExecutionHistory = true"
+              class="w-full px-6 py-3 bg-white text-primary-600 text-base font-medium rounded-lg border-2 border-primary-600 hover:bg-primary-50 transition-colors"
+            >
+              <svg class="w-5 h-5 inline mr-2 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              执行历史
+            </button>
+            
+            <!-- 库存信息 -->
+            <div v-if="workflow.inventory_enabled && workflow.inventory_count !== undefined" class="pt-3 text-center text-sm text-gray-600">
+              剩余库存：<span class="font-semibold text-primary-600">{{ workflow.inventory_count }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 确认对话框 -->
+    <ConfirmDialog
+      v-model:visible="confirmDialog.visible"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :type="confirmDialog.type"
+      :loading="confirmDialog.loading"
+      @confirm="confirmDialog.onConfirm"
+      @cancel="confirmDialog.onCancel"
+    />
+
+    <!-- 执行结果弹窗 -->
+    <ExecutionResultModal
+      :visible="showExecutionResult"
+      :execution-data="executionResultData"
+      @close="showExecutionResult = false"
+    />
+
+    <!-- 执行历史弹窗 -->
+    <ExecutionHistoryModal
+      v-if="showExecutionHistory"
+      :workflowId="workflow?.workflow_id"
+      :marketStatus="workflow?.market_status"
+      @close="showExecutionHistory = false"
+    />
+
+    <!-- 图片预览弹窗 -->
+    <ImagePreview
+      v-model:visible="showImagePreview"
+      :src="previewImage"
+    />
+
+    <!-- 执行中的全局loading -->
+    <div v-if="confirmDialog.loading && !confirmDialog.visible" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      <div class="bg-white rounded-lg p-6 flex flex-col items-center">
+        <svg class="animate-spin h-12 w-12 text-primary-600 mb-4" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p class="text-lg font-medium text-gray-900">工作流执行中...</p>
+        <p class="text-sm text-gray-500 mt-2">请稍候，正在处理您的请求</p>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { getWorkflowDetail } from '@/api/workflowMarket'
+import { createReview, deleteReview } from '@/api/workflowMarket'
+import { workflowApi } from '@/api/workflow'
+import { getBalance } from '@/api/milkCoin'
+import { showMessage } from '@/utils/message'
+import { showPrompt } from '@/utils/dialog'
+import PageHeader from '@/components/PageHeader/index.vue'
+import ConfirmDialog from '@/components/ConfirmDialog/index.vue'
+import ExecutionResultModal from '@/views/portal/workflows/components/ExecutionResultModal/index.vue'
+import ExecutionHistoryModal from '@/views/portal/workflows/components/ExecutionHistoryModal/index.vue'
+import ActionButton from '@/components/ActionButton/index.vue'
+import ImagePreview from '@/components/ImagePreview/index.vue'
+import { useUserStore } from '@/stores/user'
+
+const route = useRoute()
+const router = useRouter()
+const userStore = useUserStore()
+
+const workflowId = computed(() => parseInt(route.params.id))
+const workflow = ref(null)
+const loading = ref(true)
+const canReview = ref(false)
+const reviews = ref([])
+const showExecutionResult = ref(false)
+const showExecutionHistory = ref(false)
+const executionResultData = ref({
+  execution_id: '',
+  status: '',
+  result: null
+})
+
+// 评论相关
+const newComment = ref('')
+const newRating = ref(5)
+
+// 截图验证
+const validScreenshots = ref([])
+const hasValidScreenshots = computed(() => validScreenshots.value.length > 0)
+
+const handleImageError = (event, index) => {
+  // 图片加载失败时从有效截图列表中移除
+  validScreenshots.value = validScreenshots.value.filter((_, i) => i !== index)
+}
+
+// 确认对话框
+const confirmDialog = ref({
+  visible: false,
+  title: '',
+  message: '',
+  type: 'info',
+  loading: false,
+  onConfirm: () => {},
+  onCancel: () => {}
+})
+
+// 加载工作流详情
+const loadWorkflowDetail = async (showLoading = true) => {
+  if (showLoading) {
+    loading.value = true
+  }
+
+  try {
+    const res = await getWorkflowDetail(workflowId.value)
+    
+    console.log('Workflow detail response:', res)
+    
+    if (res.code === 0) {
+      workflow.value = res.data
+
+      console.log('🔍 调试信息:', {
+        author_id: res.data.author_id,
+        user_id: userStore.user?.id,
+        can_review: res.data.can_review,
+        原始数据: res.data
+      })
+
+      // 初始化有效截图列表
+      if (res.data.screenshots && Array.isArray(res.data.screenshots)) {
+        validScreenshots.value = res.data.screenshots.filter(url => url && url.trim())
+      } else {
+        validScreenshots.value = []
+      }
+      canReview.value = res.data.can_review || false
+
+      // 加载评价
+      if (res.data.reviews) {
+        reviews.value = res.data.reviews
+      }
+    }
+  } catch (error) {
+    console.error('加载失败:', error)
+  } finally {
+    loading.value = false
+  }
+}
+
+// 立即执行工作流
+const executeNow = async () => {
+  // 检查登录状态
+  if (!userStore.isAuthenticated) {
+    showMessage('请先登录后再执行', 'warning')
+    router.push('/login')
+    return
+  }
+
+  const model = workflow.value.pricing_model
+  const price = workflow.value.milk_coin_price
+  const workflowId = workflow.value.workflow_id
+
+  // 如果是付费工作流,检查余额
+  if (model === 'per_use' && price > 0) {
+    try {
+      const balanceRes = await getBalance()
+      if (balanceRes.code === 0) {
+        const userBalance = balanceRes.data.balance || 0
+
+        // 余额不足,引导充值
+        if (userBalance < price) {
+          confirmDialog.value = {
+            visible: true,
+            title: '奶片余额不足',
+            message: `执行此工作流需要 ${price} 奶片,您当前余额为 ${userBalance} 奶片。\n\n请前往财务中心充值后再执行。`,
+            type: 'warning',
+            loading: false,
+            onConfirm: () => {
+              confirmDialog.value.visible = false
+              // 跳转到财务中心充值页面,带上锚点定位到充值区域
+              router.push('/user/finance#recharge')
+            },
+            onCancel: () => {
+              confirmDialog.value.visible = false
+            }
+          }
+          return
+        }
+      }
+    } catch (error) {
+      console.error('检查余额失败:', error)
+    }
+  }
+
+  let title = '确认执行'
+  let message = ''
+
+  if (model === 'per_use') {
+    message = `立即执行工作流"${workflow.value.name}"将扣除 ${price} 奶片。确认执行吗？`
+  } else if (model === 'subscription') {
+    message = `立即执行工作流"${workflow.value.name}"。如果您已订阅，则免费执行；否则需要先订阅。确认执行吗？`
+  }
+
+  confirmDialog.value = {
+    visible: true,
+    title,
+    message,
+    loading: false,
+    onConfirm: async () => {
+      confirmDialog.value.loading = true
+      try {
+        // 调用执行接口
+        const response = await workflowApi.executeWorkflow(workflowId, {})
+
+        if (response.code === 0) {
+          confirmDialog.value.visible = false
+
+          const status = response.data.status
+
+          // 执行完成，直接显示结果弹窗
+          if (status === 'completed') {
+            executionResultData.value = response.data
+            showExecutionResult.value = true
+            showMessage('工作流执行成功！', 'success')
+            // 从后端获取最新库存数量
+            if (workflow.value.inventory_enabled) {
+              try {
+                const inventoryRes = await workflowApi.getInventoryCount(workflow.value.workflow_id)
+                if (inventoryRes.code === 0) {
+                  workflow.value.inventory_count = inventoryRes.data.inventory_count
+                }
+              } catch (e) {
+                console.error('获取库存失败:', e)
+              }
+            }
+          }
+          // 执行失败
+          else if (status === 'failed') {
+            showMessage(response.data.error || '工作流执行失败', 'error')
+          }
+          // 其他状态（executing/pending）
+          else {
+            showMessage(response.data.message || '工作流已提交执行', 'info')
+          }
+        } else {
+          showMessage(response.message || '执行失败', 'error')
+        }
+      } catch (error) {
+        console.error('执行失败:', error)
+        showMessage(error.response?.data?.message || '执行失败', 'error')
+      } finally {
+        confirmDialog.value.loading = false
+      }
+    },
+    onCancel: () => {
+      confirmDialog.value.visible = false
+    }
+  }
+}
+
+// 显示评价对话框
+// 提交评论
+const submitReview = async () => {
+  // 检查登录状态
+  if (!userStore.isAuthenticated) {
+    showMessage('请先登录后再评论', 'warning')
+    router.push('/login')
+    return
+  }
+
+  if (!canReview.value) {
+    showMessage('您需要先购买并使用这个工作流才能评论', 'warning')
+    return
+  }
+
+  if (!newComment.value.trim()) {
+    showMessage('请输入评价内容', 'warning')
+    return
+  }
+
+  try {
+    const res = await createReview(workflow.value.id, {
+      rating: newRating.value,
+      comment: newComment.value.trim()
+    })
+
+    if (res.code === 0) {
+      showMessage('评价成功', 'success')
+      newComment.value = ''
+      newRating.value = 5
+      // 重新加载评价
+      await loadWorkflowDetail()
+    } else {
+      showMessage(res.message || '评价失败', 'error')
+    }
+  } catch (error) {
+    console.error('评价失败:', error)
+    showMessage('评价失败', 'error')
+  }
+}
+
+// 回复评论
+const replyToReview = async (review) => {
+  // 检查登录状态
+  if (!userStore.isAuthenticated) {
+    showMessage('请先登录后再回复', 'warning')
+    router.push('/login')
+    return
+  }
+
+  const comment = await showPrompt(`回复 ${review.user_name || '匿名用户'}`, '回复评论')
+  
+  if (!comment || comment.trim() === '') {
+    return
+  }
+
+  try {
+    const res = await createReview(workflow.value.id, {
+      rating: 0,
+      comment: comment,
+      parent_id: review.id
+    })
+
+    if (res.code === 0) {
+      showMessage('回复成功', 'success')
+      loadWorkflowDetail()
+    }
+  } catch (error) {
+    console.error('回复失败:', error)
+  }
+}
+
+// 图片预览
+const previewImage = ref('')
+const showImagePreview = ref(false)
+
+const viewImage = (url) => {
+  previewImage.value = url
+  showImagePreview.value = true
+}
+
+// 获取分类文本
+const getCategoryText = (category) => {
+  const texts = {
+    'mailbox': '邮箱套餐',
+    'plugin': '插件',
+    'automation': '自动化',
+    'data': '数据处理',
+    'notification': '通知提醒',
+    'integration': '集成服务',
+    'scraping': '数据采集',
+    'image': '图片处理',
+    'other': '其他'
+  }
+  return texts[category] || category
+}
+
+// 获取定价模式文本
+const getPricingModelText = (model) => {
+  const texts = {
+    'free': '',
+    'one_time': '买断',
+    'subscription': '/月',
+    'per_use': '/次'
+  }
+  return texts[model] || ''
+}
+
+// 获取购买按钮文字
+const getPurchaseButtonText = (model) => {
+  const texts = {
+    'free': '免费使用',
+    'per_use': '按次付费',
+    'subscription': '订阅使用',
+    'one_time': '买断使用'
+  }
+  return texts[model] || '立即使用'
+}
+
+// 格式化日期
+const formatDate = (timestamp) => {
+  if (!timestamp) return ''
+  const date = new Date(timestamp)
+  return date.toLocaleDateString('zh-CN')
+}
+
+// 删除评论
+const deleteReviewById = async (reviewId) => {
+  confirmDialog.value = {
+    visible: true,
+    title: '确认删除',
+    message: '确定要删除这条评论吗？删除后无法恢复。',
+    type: 'warning',
+    loading: false,
+    onConfirm: async () => {
+      confirmDialog.value.loading = true
+      try {
+        const res = await deleteReview(workflow.value.id, reviewId)
+        if (res.code === 0) {
+          showMessage('评论已删除', 'success')
+          confirmDialog.value.visible = false
+          await loadWorkflowDetail()
+        } else {
+          showMessage(res.message || '删除失败', 'error')
+        }
+      } catch (error) {
+        console.error('删除评论失败:', error)
+        showMessage('删除失败', 'error')
+      } finally {
+        confirmDialog.value.loading = false
+      }
+    },
+    onCancel: () => {
+      confirmDialog.value.visible = false
+    }
+  }
+}
+
+onMounted(() => {
+  loadWorkflowDetail()
+})
+</script>

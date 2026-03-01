@@ -1,0 +1,136 @@
+pipeline {
+    agent {
+        docker {
+            image 'node:22'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
+        }
+    }
+    
+    environment {
+        // 项目配置
+        PROJECT_NAME = 'mail_frontend'
+        VERSION = "${new Date().format('yyyyMMdd-HHmmss')}"
+        
+        // 服务器配置（改这里的路径即可）
+        SERVER_HOST = '8.140.27.159'
+        SERVER_USER = 'root'
+        DEPLOY_PATH = '/var/web/mail/mail_frontend'  // Nginx 静态文件路径
+    }
+    
+    parameters {
+        booleanParam(
+            name: 'AUTO_DEPLOY',
+            defaultValue: true,
+            description: '自动传输到服务器'
+        )
+    }
+    
+    stages {
+        stage('准备') {
+            steps {
+                echo "🚀 开始构建前端: ${PROJECT_NAME}"
+            }
+        }
+        
+        stage('构建前端') {
+            steps {
+                script {
+                    sh """
+                        cd mail_frontend
+                        
+                        # 显示当前 Node 版本
+                        echo "📦 Node 版本: \$(node --version)"
+                        echo "📦 npm 版本: \$(npm --version)"
+                        
+                        # 启用 pnpm
+                        corepack enable
+                        corepack prepare pnpm@latest --activate
+                        
+                        # 安装依赖并构建
+                        pnpm install --frozen-lockfile
+                        pnpm run build
+                        
+                        # 验证构建结果
+                        ls -lh dist/
+                    """
+                }
+            }
+        }
+        
+        stage('打包') {
+            steps {
+                script {
+                    sh """
+                        cd mail_frontend
+                        tar -czf /tmp/dist.tar.gz dist
+                    """
+                }
+            }
+        }
+        
+        stage('部署') {
+            when {
+                expression { params.AUTO_DEPLOY == true }
+            }
+            steps {
+                script {
+                    sshagent(credentials: ['server-ssh-key']) {
+                        sh """
+                            ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} \
+                                "mkdir -p /tmp/frontend_deploy"
+                            
+                            scp -o StrictHostKeyChecking=no \
+                                /tmp/dist.tar.gz \
+                                ${SERVER_USER}@${SERVER_HOST}:/tmp/frontend_deploy/
+                            
+                            ssh -o StrictHostKeyChecking=no ${SERVER_USER}@${SERVER_HOST} << 'ENDSSH'
+                                # 创建部署目录
+                                mkdir -p ${DEPLOY_PATH}
+                                
+                                # 备份旧文件（如果存在）
+                                if [ -d "${DEPLOY_PATH}" ] && [ "\$(ls -A ${DEPLOY_PATH})" ]; then
+                                    BACKUP_DIR="${DEPLOY_PATH}_backup_\$(date +%Y%m%d_%H%M%S)"
+                                    mkdir -p "\$BACKUP_DIR"
+                                    cp -r ${DEPLOY_PATH}/* "\$BACKUP_DIR/" 2>/dev/null || true
+                                    echo "📦 已备份到: \$BACKUP_DIR"
+                                fi
+                                
+                                # 清空旧文件
+                                rm -rf ${DEPLOY_PATH}/*
+                                
+                                # 解压新文件（dist 目录下的内容）
+                                cd /tmp/frontend_deploy
+                                tar -xzf dist.tar.gz
+                                mv dist/* ${DEPLOY_PATH}/
+                                
+                                # 设置权限
+                                chmod -R 755 ${DEPLOY_PATH}
+                                
+                                # 清理临时文件
+                                rm -rf /tmp/frontend_deploy
+                                
+                                # 验证部署
+                                echo "📁 部署的文件列表："
+                                ls -lh ${DEPLOY_PATH}
+                                
+                                echo "✅ 前端部署完成！路径: ${DEPLOY_PATH}"
+ENDSSH
+                        """
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "✅ 构建成功"
+        }
+        failure {
+            echo "❌ 构建失败"
+        }
+        always {
+            sh "rm -f /tmp/dist.tar.gz || true"
+        }
+    }
+}

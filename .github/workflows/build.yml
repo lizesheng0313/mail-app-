@@ -1,0 +1,97 @@
+name: Build Desktop App
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如 1.2.0)'
+        required: true
+      prev_version:
+        description: '上一个版本号，用于生成更新清单 (例如 1.1.0)'
+        required: true
+
+env:
+  APP_NAME: mail-desktop
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: universal-apple-darwin
+            bundles: app,updater
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: msi,updater
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add macOS targets
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: Install frontend dependencies
+        run: cd mail_frontend && pnpm install
+
+      - name: Install desktop dependencies
+        run: cd mail_desktop && pnpm install
+
+      - name: Update version
+        shell: bash
+        run: |
+          cd mail_desktop/src-tauri
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"${{ github.event.inputs.version }}\"/" tauri.conf.json
+          else
+            sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${{ github.event.inputs.version }}\"/" tauri.conf.json
+          fi
+          cat tauri.conf.json | grep version
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: mail_desktop
+          tauriScript: pnpm tauri
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: Upload macOS artifacts
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            mail_desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz
+            mail_desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
+
+      - name: Upload Windows artifacts
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            mail_desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            mail_desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi.zip
+            mail_desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi.zip.sig

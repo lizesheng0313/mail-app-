@@ -1,0 +1,60 @@
+[package]
+name = "mail-desktop"
+version = "0.1.0"
+description = "邮件管理桌面客户端"
+authors = ["lizesheng"]
+license = "MIT"
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+# Tauri 核心
+tauri = { version = "2.10", features = ["devtools"] }
+tauri-plugin-log = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
+
+# 序列化
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# 日志
+log = "0.4"
+
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+
+# IMAP 邮件客户端（同步版本，在线程池中执行）
+imap = "2"
+
+
+# 邮件解析
+mailparse = "0.15"
+
+# HTTP 客户端（用于同步到远程服务器）
+reqwest = { version = "0.12", features = ["json", "native-tls"] }
+
+# 错误处理
+thiserror = "2"
+anyhow = "1"
+
+# 时间处理
+chrono = { version = "0.4", features = ["serde"] }
+
+# TLS（POP3 同步连接需要）
+native-tls = "0.2"
+
+# 异步工具
+futures = "0.3"
+tauri-plugin-process = "2"

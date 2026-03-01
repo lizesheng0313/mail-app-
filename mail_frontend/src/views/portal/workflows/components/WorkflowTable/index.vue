@@ -1,0 +1,343 @@
+<template>
+  <div class="bg-white shadow rounded-lg">
+    <div class="px-6 py-4 border-b border-gray-200">
+      <h2 class="text-lg font-medium text-black">工作流列表</h2>
+    </div>
+
+    <div v-if="loading" class="text-center py-12">
+      <div class="inline-flex items-center">
+        <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-primary-500" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        加载中...
+      </div>
+    </div>
+
+    <div v-else-if="workflows.length === 0" class="text-center py-12">
+      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+      <h3 class="mt-2 text-sm font-medium text-black">暂无工作流</h3>
+      <p class="mt-1 text-sm text-black">创建您的第一个工作流来开始自动化</p>
+    </div>
+
+    <div v-else class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">
+              工作流信息
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">
+              状态
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">
+              触发器
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">
+              步骤
+            </th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">
+              操作
+            </th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+          <tr
+            v-for="workflow in workflows"
+            :key="workflow.workflow_id"
+            :class="[
+              'hover:bg-gray-50',
+              highlightWorkflowId === workflow.workflow_id ? 'bg-yellow-50 border-yellow-200' : '',
+              isPurchasedAndOffline(workflow) ? 'opacity-60 bg-gray-50' : ''
+            ]"
+          >
+            <td class="px-6 py-4 whitespace-nowrap">
+              <div class="flex items-center">
+                <div class="h-10 w-10 rounded-lg bg-gradient-to-br from-primary-600 to-primary-700 flex items-center justify-center">
+                  <svg class="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <div class="ml-4">
+                  <div class="flex items-center gap-2">
+                    <div class="text-sm font-medium text-black">{{ workflow.name }}</div>
+                    <span v-if="workflow.is_owner === 1 || workflow.is_owner === true" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                      我的
+                    </span>
+                    <span v-else-if="workflow.is_owner === 0 || workflow.is_owner === false" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                      已购买
+                    </span>
+                    <span v-if="isPurchasedAndOffline(workflow)" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600">
+                      已下架
+                    </span>
+                  </div>
+                  <div class="text-sm text-black" v-if="workflow.description && workflow.description !== workflow.name">{{ workflow.description }}</div>
+                  <div class="text-xs text-gray-400 mt-1">ID: {{ workflow.workflow_id }}</div>
+                </div>
+              </div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+              <!-- 优先显示市场状态，没有市场状态则显示运行状态 -->
+              <template v-if="workflow.market_status && workflow.market_status !== 'draft'">
+                <span 
+                  :class="getMarketStatusClass(workflow.market_status)" 
+                  class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                >
+                  <!-- 审核中图标 -->
+                  <svg v-if="workflow.market_status === 'reviewing'" class="w-3 h-3 mr-1 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <!-- 已发布图标 -->
+                  <svg v-else-if="workflow.market_status === 'approved' || workflow.market_status === 'published'" class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <!-- 已驳回图标 -->
+                  <svg v-else-if="workflow.market_status === 'rejected'" class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  {{ getMarketStatusLabel(workflow.market_status) }}
+                </span>
+                <!-- 驳回原因 -->
+                <div v-if="workflow.market_status === 'rejected' && workflow.review_reason" class="mt-1 text-xs text-red-600">
+                  原因: {{ workflow.review_reason }}
+                </div>
+              </template>
+              <!-- 运行状态（没有市场状态或市场状态为draft时显示） -->
+              <span v-else :class="getStatusClass(workflow.status)" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium">
+                {{ getStatusLabel(workflow.status) }}
+              </span>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap">
+              <div class="text-sm text-black">
+                {{ workflow.trigger_count || 0 }} 个触发器
+              </div>
+              <div v-if="workflow.trigger_types && workflow.trigger_types.length > 0" class="flex flex-wrap gap-1 mt-1">
+                <span
+                  v-for="type in workflow.trigger_types"
+                  :key="type"
+                  :class="getTriggerTypeClass(type)"
+                  class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium"
+                >
+                  {{ getTriggerTypeLabel(type) }}
+                </span>
+              </div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-black">
+              {{ workflow.steps?.length || 0 }} 个步骤
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+              <!-- 我购买的工作流 - 简化按钮 -->
+              <div v-if="!workflow.is_owner" class="flex items-center space-x-2">
+                <!-- 执行按钮 -->
+                <ActionButton
+                  icon="play"
+                  :tooltip="isPurchasedAndOffline(workflow) ? '工作流已下架，无法执行' : '执行工作流'"
+                  :variant="isPurchasedAndOffline(workflow) ? 'default' : 'primary'"
+                  :disabled="isPurchasedAndOffline(workflow)"
+                  @click="!isPurchasedAndOffline(workflow) && $emit('execute', workflow)"
+                />
+                <!-- 执行历史 -->
+                <ActionButton
+                  icon="clock"
+                  tooltip="执行历史"
+                  variant="default"
+                  @click="viewWorkflowHistory(workflow)"
+                />
+              </div>
+              
+              <!-- 我创建的工作流 - 完整按钮 -->
+              <div v-else class="flex items-center space-x-2">
+                <!-- 查看详情 -->
+                <ActionButton
+                  icon="eye"
+                  tooltip="查看详情"
+                  variant="view"
+                  @click="$emit('view', workflow)"
+                />
+                <!-- 编辑工作流 -->
+                <ActionButton
+                  icon="edit"
+                  tooltip="编辑工作流"
+                  variant="edit"
+                  @click="$emit('edit', workflow)"
+                />
+                <!-- 查看历史 -->
+                <ActionButton
+                  icon="clock"
+                  tooltip="查看历史"
+                  variant="default"
+                  @click="viewWorkflowHistory(workflow)"
+                />
+                <!-- 发布到市场 -->
+                <ActionButton
+                  v-if="!workflow.market_status || workflow.market_status === 'draft' || workflow.market_status === 'rejected'"
+                  icon="cloud"
+                  tooltip="发布到市场"
+                  variant="primary"
+                  @click="$emit('publish', workflow)"
+                />
+                <!-- 重新上架（已下架的） -->
+                <ActionButton
+                  v-if="workflow.market_status === 'offline'"
+                  icon="upload"
+                  tooltip="重新上架"
+                  variant="success"
+                  @click="$emit('republish', workflow)"
+                />
+                <!-- 编辑市场信息 -->
+                <ActionButton
+                  v-if="workflow.market_status === 'published' || workflow.market_status === 'approved' || workflow.market_status === 'offline'"
+                  icon="settings"
+                  tooltip="编辑市场信息"
+                  variant="warning"
+                  @click="$emit('edit-publish', workflow)"
+                />
+                <!-- 下架 -->
+                <ActionButton
+                  v-if="workflow.market_status === 'published' || workflow.market_status === 'approved'"
+                  icon="download"
+                  tooltip="下架"
+                  variant="delete"
+                  @click="$emit('unpublish', workflow)"
+                />
+                <!-- 库存管理（只要开启了库存就显示，不需要等审核通过） -->
+                <ActionButton
+                  v-if="workflow.inventory_enabled"
+                  icon="database"
+                  :tooltip="getInventoryTooltip(workflow)"
+                  :variant="workflow.inventory_count > 0 ? 'success' : 'default'"
+                  @click="$emit('manage-inventory', workflow)"
+                />
+                <!-- 删除 -->
+                <ActionButton
+                  icon="delete"
+                  tooltip="删除工作流"
+                  variant="delete"
+                  @click="$emit('delete', workflow)"
+                />
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { useRouter } from 'vue-router'
+import { formatTimestamp } from '@/utils/timeUtils'
+import ActionButton from '@/components/ActionButton/index.vue'
+
+const router = useRouter()
+
+const props = defineProps({
+  workflows: {
+    type: Array,
+    default: () => []
+  },
+  loading: {
+    type: Boolean,
+    default: false
+  },
+  highlightWorkflowId: {
+    type: String,
+    default: null
+  }
+})
+
+const emit = defineEmits(['view', 'edit', 'delete', 'publish', 'unpublish', 'republish', 'manage-inventory', 'execute', 'edit-publish'])
+
+// 判断是否是已购买但已下架的工作流
+const isPurchasedAndOffline = (workflow) => {
+  const isPurchased = workflow.is_owner === 0 || workflow.is_owner === false
+  const isOffline = workflow.market_status === 'draft' || workflow.market_status === 'offline'
+  return isPurchased && isOffline
+}
+
+// 方法
+const viewWorkflowHistory = (workflow) => {
+  router.push(`/workflows/execution-history?workflow_id=${workflow.workflow_id}`)
+}
+const getStatusClass = (status) => {
+  const statusMap = {
+    active: 'bg-primary-100 text-success-800',
+    inactive: 'bg-gray-100 text-black',
+    draft: 'bg-yellow-100 text-yellow-800',
+    error: 'bg-red-100 text-red-800'
+  }
+  return statusMap[status] || 'bg-gray-100 text-black'
+}
+
+const getStatusLabel = (status) => {
+  const statusMap = {
+    active: '活跃',
+    inactive: '非活跃',
+    draft: '草稿',
+    error: '错误'
+  }
+  return statusMap[status] || status
+}
+
+// 市场状态样式
+const getMarketStatusClass = (status) => {
+  const classes = {
+    'draft': 'bg-gray-200 text-gray-700 border-gray-300',
+    'reviewing': 'bg-yellow-100 text-yellow-800 border-yellow-300',
+    'approved': 'bg-green-100 text-green-800 border-green-300',
+    'published': 'bg-green-100 text-green-800 border-green-300',
+    'rejected': 'bg-red-100 text-red-800 border-red-300',
+    'offline': 'bg-gray-200 text-gray-700 border-gray-300'
+  }
+  return classes[status] || 'bg-gray-100 text-gray-600 border-gray-200'
+}
+
+// 市场状态标签
+const getMarketStatusLabel = (status) => {
+  const labels = {
+    'draft': '未发布',
+    'reviewing': '审核中',
+    'approved': '已发布',
+    'published': '已发布',
+    'rejected': '已驳回',
+    'offline': '已下架'
+  }
+  return labels[status] || status
+}
+
+const getInventoryTooltip = (workflow) => {
+  if (!workflow.inventory_count || workflow.inventory_count <= 0) {
+    return '添加库存'
+  }
+  // 剩余库存 = 总库存 - 已使用
+  const available = workflow.inventory_count
+  return `剩余库存: ${available}`
+}
+
+const formatDate = (timestamp) => {
+  if (!timestamp || timestamp === 0) return '从未执行'
+  return formatTimestamp(timestamp, 'datetime')
+}
+
+const getTriggerTypeLabel = (type) => {
+  const typeMap = {
+    email: '邮件',
+    schedule: '定时',
+    webhook: 'Webhook',
+    manual: '手动'
+  }
+  return typeMap[type] || type
+}
+
+const getTriggerTypeClass = (type) => {
+  const classMap = {
+    email: 'bg-primary-100 text-primary-700',
+    schedule: 'bg-primary-100 text-primary-700',
+    webhook: 'bg-purple-100 text-purple-700',
+    manual: 'bg-gray-100 text-black'
+  }
+  return classMap[type] || 'bg-gray-100 text-black'
+}
+</script>
