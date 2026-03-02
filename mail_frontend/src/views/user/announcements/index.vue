@@ -163,7 +163,7 @@ const loadAnnouncements = async () => {
   loading.value = true
   try {
     const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/api/announcements/?page=${page.value}&page_size=${pageSize.value}`, {
+    const response = await fetch(`/mail-api/v1/announcements/?page=${page.value}&page_size=${pageSize.value}`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -208,7 +208,7 @@ const viewDetail = async (announcement) => {
 const markAsRead = async (announcementId) => {
   try {
     const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/api/announcements/${announcementId}/read`, {
+    const response = await fetch(`/mail-api/v1/announcements/${announcementId}/read`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`

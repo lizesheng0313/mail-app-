@@ -15,7 +15,7 @@ import { usePageTracking } from '@/composables/usePageTracking'
 import FloatingFeedback from '@/components/FloatingFeedback/index.vue'
 import SystemMaintenance from '@/components/SystemMaintenance/index.vue'
 import AppUpdater from '@/components/AppUpdater/index.vue'
-import { registerMaintenanceCallback } from '@/services/api'
+import { registerMaintenanceCallback, isTauri } from '@/services/api'
 
 const userStore = useUserStore()
 const maintenanceRef = ref<InstanceType<typeof SystemMaintenance>>()
@@ -29,6 +29,18 @@ onMounted(async () => {
   // 桌面端启动时检查更新
   updaterRef.value?.checkForUpdates()
 
+  // Windows 桌面端：在标题栏显示版本号
+  if (isTauri() && navigator.platform.toUpperCase().includes('WIN')) {
+    try {
+      const { getVersion } = await import('@tauri-apps/api/app')
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      const ver = await getVersion()
+      await getCurrentWindow().setTitle(`肥猫猫 v${ver}`)
+    } catch (e) {
+      console.error('设置窗口标题失败:', e)
+    }
+  }
+
   try {
     await userStore.checkAuth()
   } catch (e) {
@@ -40,3 +52,4 @@ onMounted(async () => {
   })
 })
 </script>
+

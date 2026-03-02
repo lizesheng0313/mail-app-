@@ -19,7 +19,7 @@ tauri-build = { version = "2.5", features = [] }
 
 [dependencies]
 # Tauri 核心
-tauri = { version = "2.10", features = ["devtools"] }
+tauri = { version = "2.10", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls", "zip"] }

@@ -239,7 +239,7 @@ const loadAnnouncements = async () => {
   loading.value = true
   try {
     const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/api/announcements/?page=${page.value}&page_size=${pageSize.value}`, {
+    const response = await fetch(`/mail-api/v1/announcements/?page=${page.value}&page_size=${pageSize.value}`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -313,8 +313,8 @@ const handleSave = async () => {
   try {
     const token = localStorage.getItem('token')
     const url = editingItem.value
-      ? `/mail-api/v1/api/announcements/${editingItem.value.id}`
-      : '/mail-api/v1/api/announcements/'
+      ? `/mail-api/v1/announcements/${editingItem.value.id}`
+      : '/mail-api/v1/announcements/'
 
     const response = await fetch(url, {
       method: editingItem.value ? 'PUT' : 'POST',
@@ -360,7 +360,7 @@ const handleReset = () => {
 const handleDelete = async () => {
   try {
     const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/api/announcements/${deleteTarget.value.id}`, {
+    const response = await fetch(`/mail-api/v1/announcements/${deleteTarget.value.id}`, {
       method: 'DELETE',
       headers: {
         'Authorization': `Bearer ${token}`

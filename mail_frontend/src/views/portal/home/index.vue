@@ -51,6 +51,14 @@
             {{ batchLoginLoading ? '登录中...' : '添加邮箱' }}
           </button>
 
+          <!-- Web端第三方邮箱提示 -->
+          <span
+            v-if="mailboxType === 'external' && !isTauri()"
+            class="text-sm text-amber-700 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg"
+          >
+            第三方邮箱建议使用桌面端，减少封号风险 <router-link to="/download" class="text-amber-800 font-semibold underline">立即下载</router-link>
+          </span>
+
           <!-- 写邮件按钮 - 简洁风格 -->
           <!-- <router-link
             to="/send-email"
@@ -230,6 +238,13 @@
       <EmailDetail :email="mailStore.selectedEmail" @expand="openEmailModal" />
     </template>
   </ThreeColumnLayout>
+
+  <!-- Web端小程序二维码 -->
+  <div v-if="!isTauri() && showQrPromo" class="fixed right-5 top-1/2 -translate-y-1/2 bg-white rounded-xl shadow-lg border border-gray-100 p-5 z-50 flex flex-col items-center">
+    <button @click="showQrPromo = false" class="absolute top-1 right-2 text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+    <img :src="wxProgramImg" class="w-28 h-28 rounded-lg" alt="小程序二维码" />
+    <p class="text-xs text-gray-500 mt-2">扫码使用小程序版</p>
+  </div>
   
   <!-- 邮件内容弹窗 -->
   <EmailContentModal
@@ -299,6 +314,7 @@ import ConfirmDialog from '@/components/ConfirmDialog/index.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import { showMessage } from '@/utils/message'
 import { isTauri, getServerUrl } from '@/services/api'
+import wxProgramImg from '@/assets/img/wx_program.jpg'
 
 // 获取 Tauri invoke（按需加载，避免竞态）
 async function getTauriInvoke() {
@@ -333,6 +349,7 @@ const deleting = ref(false)
 const deletingIds = ref<number[]>([])
 const deletingBatch = ref(false)
 const batchLoginLoading = ref(false)
+const showQrPromo = ref(true)
 
 // 分享相关状态
 const showShareModal = ref(false)

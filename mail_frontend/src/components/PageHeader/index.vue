@@ -330,7 +330,7 @@ const loadAnnouncements = async () => {
   announcementsLoading.value = true
   try {
     const token = localStorage.getItem('token')
-    const response = await fetch('/mail-api/v1/api/announcements/?page=1&page_size=10', {
+    const response = await fetch('/mail-api/v1/announcements/?page=1&page_size=10', {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -355,7 +355,7 @@ const loadUnreadCount = async () => {
 
   try {
     const token = localStorage.getItem('token')
-    const response = await fetch('/mail-api/v1/api/announcements/unread/count', {
+    const response = await fetch('/mail-api/v1/announcements/unread/count', {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -385,7 +385,7 @@ const viewAnnouncement = async (announcement: any) => {
 const markAsRead = async (announcementId: number) => {
   try {
     const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/api/announcements/${announcementId}/read`, {
+    const response = await fetch(`/mail-api/v1/announcements/${announcementId}/read`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`

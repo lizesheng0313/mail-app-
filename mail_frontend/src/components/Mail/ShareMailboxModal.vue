@@ -135,6 +135,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { mailboxShareAPI } from '@/api/mailboxShare'
+import { isTauri } from '@/services/api'
 import { showMessage } from '@/utils/message'
 
 const props = defineProps({
@@ -171,7 +172,9 @@ const expireAt = ref(null)
 // 完整分享链接
 const fullShareUrl = computed(() => {
   if (!shareUrl.value) return ''
-  return `${window.location.origin}${shareUrl.value}`
+  // 桌面端用线上地址，保证分享链接可被外部访问
+  const origin = isTauri() ? 'https://zjkdongao.cn' : window.location.origin
+  return `${origin}${shareUrl.value}`
 })
 
 // 过期时间文本
