@@ -2,6 +2,7 @@ use crate::mail;
 use crate::mail::types::{get_server_config, EmailData, FetchResult, LoginResult};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use tauri_plugin_updater::UpdaterExt;
 
 /// 添加外部邮箱请求
 #[derive(Debug, Deserialize)]
@@ -224,14 +225,137 @@ async fn sync_emails_to_server(
     }
 }
 
-/// 测试连接（用于调试）
-#[tauri::command]
-pub async fn test_connection() -> Result<String, String> {
-    Ok("Tauri 后端连接正常".to_string())
-}
-
 /// 检查是否在 Tauri 环境
 #[tauri::command]
 pub fn is_tauri() -> bool {
     true
+}
+
+/// 更新信息
+#[derive(Debug, Serialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes: String,
+}
+
+/// 保底更新检查（用 reqwest 直接请求更新清单，不依赖 updater 插件）
+#[tauri::command]
+pub async fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let current_version = app.package_info().version.to_string();
+
+    let target = if cfg!(target_os = "macos") {
+        "darwin"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
+    };
+
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
+
+    let url = format!(
+        "https://zjkdongao.cn/desktop-updates/{}-{}/latest",
+        target, arch
+    );
+
+    info!("保底更新检查: {} (当前版本 {})", url, current_version);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("服务器返回 {}", response.status()));
+    }
+
+    let manifest: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("解析JSON失败: {}", e))?;
+
+    let remote_version = manifest["version"]
+        .as_str()
+        .ok_or("缺少version字段")?;
+
+    if is_newer_version(remote_version, &current_version) {
+        info!("发现新版本: {} > {}", remote_version, current_version);
+        Ok(Some(UpdateInfo {
+            version: remote_version.to_string(),
+            notes: manifest["notes"].as_str().unwrap_or("").to_string(),
+        }))
+    } else {
+        info!("已是最新版本: {} <= {}", remote_version, current_version);
+        Ok(None)
+    }
+}
+
+fn is_newer_version(remote: &str, current: &str) -> bool {
+    let parse = |v: &str| -> Vec<u32> {
+        v.trim_start_matches('v')
+            .split('.')
+            .filter_map(|s| s.parse().ok())
+            .collect()
+    };
+    parse(remote) > parse(current)
+}
+
+/// 保底更新：用 updater 插件的 Rust API 下载安装（用户点击"立即更新"后调用）
+#[tauri::command]
+pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+
+    info!("保底更新：通过 UpdaterExt 触发下载安装");
+
+    let updater = app.updater()
+        .map_err(|e| format!("创建 updater 失败: {}", e))?;
+
+    let update = updater.check().await
+        .map_err(|e| format!("检查更新失败: {}", e))?;
+
+    let update = match update {
+        Some(u) => u,
+        None => return Err("没有可用更新".to_string()),
+    };
+
+    info!("开始下载更新: v{}", update.version);
+
+    let app_for_chunks = app.clone();
+    let app_for_finish = app.clone();
+    let mut first_chunk = true;
+
+    update.download_and_install(
+        move |chunk_length, content_length| {
+            if first_chunk {
+                first_chunk = false;
+                let _ = app_for_chunks.emit("update-progress", serde_json::json!({
+                    "event": "Started",
+                    "data": { "contentLength": content_length }
+                }));
+            }
+            let _ = app_for_chunks.emit("update-progress", serde_json::json!({
+                "event": "Progress",
+                "data": { "chunkLength": chunk_length }
+            }));
+        },
+        move || {
+            let _ = app_for_finish.emit("update-progress", serde_json::json!({
+                "event": "Finished"
+            }));
+        },
+    ).await.map_err(|e| format!("下载安装失败: {}", e))?;
+
+    info!("更新下载安装完成");
+
+    Ok(())
 }

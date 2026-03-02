@@ -16,7 +16,7 @@
         </div>
       </template>
 
-      <!-- 下载进度 -->
+      <!-- 下载进度（仅插件模式） -->
       <template v-if="phase === 'downloading'">
         <h3 class="update-title">正在更新</h3>
         <div class="progress-wrap">
@@ -38,7 +38,8 @@
         <h3 class="update-title">更新失败</h3>
         <p class="update-desc">{{ errorMsg }}</p>
         <div class="update-actions">
-          <button class="btn-update" @click="dismiss">我知道了</button>
+          <button class="btn-later" @click="dismiss">取消</button>
+          <button class="btn-update" @click="startUpdate">重试</button>
         </div>
       </template>
     </div>
@@ -55,7 +56,9 @@ const version = ref('')
 const percent = ref(0)
 const hint = ref('准备下载...')
 const errorMsg = ref('')
+
 let pendingUpdate: any = null
+let updateMode: 'plugin' | 'fallback' = 'plugin'
 
 function dismiss() {
   showModal.value = false
@@ -63,29 +66,61 @@ function dismiss() {
 }
 
 async function startUpdate() {
-  if (!pendingUpdate) return
   phase.value = 'downloading'
   percent.value = 0
   hint.value = '准备下载...'
 
   try {
-    let downloaded = 0
-    let total = 0
-    await pendingUpdate.downloadAndInstall((event: any) => {
-      if (event.event === 'Started') {
-        total = event.data.contentLength || 0
-        hint.value = '正在下载...'
-      } else if (event.event === 'Progress') {
-        downloaded += event.data.chunkLength || 0
-        percent.value = total > 0 ? Math.round((downloaded / total) * 100) : 0
-        const mb = (downloaded / 1024 / 1024).toFixed(1)
-        const totalMb = (total / 1024 / 1024).toFixed(1)
-        hint.value = `${mb} MB / ${totalMb} MB`
-      } else if (event.event === 'Finished') {
-        percent.value = 100
-        hint.value = '下载完成，正在安装...'
+    if (updateMode === 'plugin' && pendingUpdate) {
+      // 插件模式：用 JS API 下载安装
+      let downloaded = 0
+      let total = 0
+      await pendingUpdate.downloadAndInstall((event: any) => {
+        if (event.event === 'Started') {
+          total = event.data.contentLength || 0
+          hint.value = '正在下载...'
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength || 0
+          percent.value = total > 0 ? Math.round((downloaded / total) * 100) : 0
+          const mb = (downloaded / 1024 / 1024).toFixed(1)
+          const totalMb = (total / 1024 / 1024).toFixed(1)
+          hint.value = `${mb} MB / ${totalMb} MB`
+        } else if (event.event === 'Finished') {
+          percent.value = 100
+          hint.value = '下载完成，正在安装...'
+        }
+      })
+    } else {
+      // 保底模式：通过 Rust 命令用 updater 插件的 Rust API 下载安装
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { listen } = await import('@tauri-apps/api/event')
+
+      let downloaded = 0
+      let total = 0
+      const unlisten = await listen('update-progress', (event: any) => {
+        const payload = event.payload
+        if (payload.event === 'Started') {
+          total = payload.data?.contentLength || 0
+          hint.value = '正在下载...'
+        } else if (payload.event === 'Progress') {
+          downloaded += payload.data?.chunkLength || 0
+          percent.value = total > 0 ? Math.round((downloaded / total) * 100) : 0
+          const mb = (downloaded / 1024 / 1024).toFixed(1)
+          const totalMb = (total / 1024 / 1024).toFixed(1)
+          hint.value = `${mb} MB / ${totalMb} MB`
+        } else if (payload.event === 'Finished') {
+          percent.value = 100
+          hint.value = '下载完成，正在安装...'
+        }
+      })
+
+      try {
+        await invoke('download_and_install_update')
+      } finally {
+        unlisten()
       }
-    })
+    }
+
     hint.value = '安装完成，正在重启...'
     const { relaunch } = await import('@tauri-apps/plugin-process')
     await relaunch()
@@ -97,17 +132,35 @@ async function startUpdate() {
 
 async function checkForUpdates() {
   if (!isTauri()) return
+
+  // 1. 优先用 updater 插件
   try {
     const { check } = await import('@tauri-apps/plugin-updater')
     const update = await check()
     if (update) {
       pendingUpdate = update
       version.value = update.version
+      updateMode = 'plugin'
+      phase.value = 'confirm'
+      showModal.value = true
+      return // 插件检测到更新了，不用再查
+    }
+  } catch (e: any) {
+    console.error('[Updater] 插件检查失败:', e?.message || e)
+  }
+
+  // 2. 插件没检测到更新（返回null或报错），用 reqwest 再确认一次
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const result = await invoke('check_for_update') as { version: string; notes: string } | null
+    if (result) {
+      version.value = result.version
+      updateMode = 'fallback'
       phase.value = 'confirm'
       showModal.value = true
     }
-  } catch (e) {
-    console.log('检查更新:', e)
+  } catch (e: any) {
+    console.error('[Updater] 保底检查也失败:', e?.message || e)
   }
 }
 
