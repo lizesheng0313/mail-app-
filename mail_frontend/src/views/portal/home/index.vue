@@ -332,7 +332,7 @@ const userStore = useUserStore()
 const mailboxStore = useMailboxStore()
 const mailStore = useMailStore()
 
-const emailListRef = ref()
+
 const systemMailboxListRef = ref()
 const externalMailboxListRef = ref()
 const systemEmailListRef = ref()
@@ -785,8 +785,11 @@ const fetchExternalMailboxEmails = async () => {
 // 选择外部邮件
 const handleSelectExternalEmail = async (email: any) => {
   selectedExternalEmailId.value = email.id
-  mailStore.selectedEmail = email
-  
+  mailStore.selectEmail(email)
+
+  // 获取完整详情（含附件）
+  await mailStore.fetchEmailDetail(email.id, 'external')
+
   // 标记为已读
   if (!email.is_read) {
     try {
@@ -879,7 +882,11 @@ const fetchAllExternalEmails = async () => {
       }
 
       if (failCount === 0) {
-        showMessage(`收取成功，共新增 ${totalNew} 封邮件`, 'success')
+        if (totalNew > 0) {
+          showMessage(`收取成功，新增 ${totalNew} 封邮件`, 'success')
+        } else {
+          showMessage('收取完成，暂无新邮件', 'info')
+        }
       } else {
         showMessage(`收取完成，新增 ${totalNew} 封，${failCount} 个邮箱失败`, 'warning')
       }
@@ -1058,11 +1065,14 @@ const confirmDeleteEmails = async () => {
     
     // 批量删除成功后，退出批量模式
     if (deletingBatch.value) {
-      if (emailListRef.value?.cancelBatchMode) {
-        emailListRef.value.cancelBatchMode()
-      }
-      if (systemMailboxListRef.value?.cancelBatchMode) {
-        systemMailboxListRef.value.cancelBatchMode()
+      if (mailboxType.value === 'system') {
+        if (systemEmailListRef.value?.cancelBatchMode) {
+          systemEmailListRef.value.cancelBatchMode()
+        }
+      } else {
+        if (externalEmailListRef.value?.cancelBatchMode) {
+          externalEmailListRef.value.cancelBatchMode()
+        }
       }
     }
   } catch (error: any) {

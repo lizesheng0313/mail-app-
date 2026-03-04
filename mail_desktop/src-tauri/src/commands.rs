@@ -2,6 +2,7 @@ use crate::mail;
 use crate::mail::types::{get_server_config, EmailData, FetchResult, LoginResult};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tauri_plugin_updater::UpdaterExt;
 
 /// 添加外部邮箱请求
@@ -180,23 +181,37 @@ pub async fn fetch_emails(
     };
 
     if result.success && !result.emails.is_empty() {
-        // 同步到远程服务器
-        if let Err(e) = sync_emails_to_server(&server_url, &token, mailbox_id, &result.emails).await {
-            error!("同步邮件到服务器失败: {}", e);
-            // 即使同步失败也返回收取结果，让用户知道邮件已收取
+        // 保存附件到本地
+        save_attachments_locally(&result.emails);
+
+        // 同步到远程服务器（附件 data 字段会被 serde(skip) 跳过，只发元数据）
+        match sync_emails_to_server(&server_url, &token, mailbox_id, &result.emails).await {
+            Ok(new_count) => {
+                // 用后端去重后的实际新增数替换总数
+                return Ok(FetchResult {
+                    success: true,
+                    message: format!("收取成功，新增 {} 封邮件", new_count),
+                    emails: result.emails,
+                    count: new_count,
+                });
+            }
+            Err(e) => {
+                error!("同步邮件到服务器失败: {}", e);
+                // 同步失败仍返回收取结果
+            }
         }
     }
 
     Ok(result)
 }
 
-/// 同步邮件到远程服务器
+/// 同步邮件到远程服务器，返回实际新增数量
 async fn sync_emails_to_server(
     server_url: &str,
     token: &str,
     mailbox_id: i64,
     emails: &[EmailData],
-) -> Result<(), String> {
+) -> Result<usize, String> {
     info!("同步 {} 封邮件到服务器", emails.len());
 
     let client = reqwest::Client::new();
@@ -216,8 +231,14 @@ async fn sync_emails_to_server(
         .map_err(|e| format!("请求失败: {}", e))?;
 
     if response.status().is_success() {
-        info!("✅ 邮件同步成功");
-        Ok(())
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| format!("解析响应失败: {}", e))?;
+
+        let new_count = body["data"]["count"].as_u64().unwrap_or(0) as usize;
+        info!("✅ 邮件同步成功，新增 {} 封", new_count);
+        Ok(new_count)
     } else {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
@@ -358,4 +379,73 @@ pub async fn download_and_install_update(app: tauri::AppHandle) -> Result<(), St
     info!("更新下载安装完成");
 
     Ok(())
+}
+
+/// 获取附件本地存储根目录
+fn get_attachments_dir() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    home.join(".mail-desktop").join("attachments")
+}
+
+/// 将 message_id 转为安全的目录名
+fn sanitize_message_id(message_id: &str) -> String {
+    message_id
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
+}
+
+/// 保存邮件附件到本地磁盘
+fn save_attachments_locally(emails: &[EmailData]) {
+    let base_dir = get_attachments_dir();
+
+    for email in emails {
+        if email.attachments.is_empty() {
+            continue;
+        }
+        let dir = base_dir.join(sanitize_message_id(&email.message_id));
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            error!("创建附件目录失败: {:?}, {}", dir, e);
+            continue;
+        }
+        for att in &email.attachments {
+            if att.data.is_empty() {
+                continue;
+            }
+            let file_path = dir.join(&att.filename);
+            match std::fs::write(&file_path, &att.data) {
+                Ok(_) => info!("附件已保存到本地: {:?}", file_path),
+                Err(e) => error!("保存附件失败: {:?}, {}", file_path, e),
+            }
+        }
+    }
+}
+
+/// 打开本地附件（桌面端用）
+#[tauri::command]
+pub fn open_local_attachment(message_id: String, filename: String) -> Result<String, String> {
+    let dir = get_attachments_dir().join(sanitize_message_id(&message_id));
+    let file_path = dir.join(&filename);
+
+    if !file_path.exists() {
+        return Err(format!("附件文件不存在: {:?}", file_path));
+    }
+
+    // 用系统默认程序打开文件
+    open::that(&file_path).map_err(|e| format!("打开文件失败: {}", e))?;
+
+    Ok(file_path.to_string_lossy().to_string())
+}
+
+/// 获取附件本地路径（用于「另存为」等场景）
+#[tauri::command]
+pub fn get_attachment_path(message_id: String, filename: String) -> Result<String, String> {
+    let dir = get_attachments_dir().join(sanitize_message_id(&message_id));
+    let file_path = dir.join(&filename);
+
+    if !file_path.exists() {
+        return Err("附件文件不存在".to_string());
+    }
+
+    Ok(file_path.to_string_lossy().to_string())
 }

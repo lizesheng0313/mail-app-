@@ -91,9 +91,9 @@ BUNDLE_DIR="src-tauri/target/universal-apple-darwin/release/bundle"
 echo "📦 手动创建 DMG..."
 mkdir -p "$BUNDLE_DIR/dmg"
 TEMP_DIR=$(mktemp -d)
-cp -R "$BUNDLE_DIR/macos/邮件管理.app" "$TEMP_DIR/"
+cp -R "$BUNDLE_DIR/macos/肥猫猫邮箱.app" "$TEMP_DIR/"
 ln -s /Applications "$TEMP_DIR/Applications"
-hdiutil create -volname "邮件管理" -srcfolder "$TEMP_DIR" -ov -format UDZO "$BUNDLE_DIR/dmg/mail-desktop_${VERSION}_universal.dmg"
+hdiutil create -volname "肥猫猫邮箱" -srcfolder "$TEMP_DIR" -ov -format UDZO "$BUNDLE_DIR/dmg/mail-desktop_${VERSION}_universal.dmg"
 rm -rf "$TEMP_DIR"
 
 echo ""

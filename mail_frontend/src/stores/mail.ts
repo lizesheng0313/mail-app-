@@ -73,10 +73,10 @@ export const useMailStore = defineStore('mail', () => {
 
 
 
-  const fetchEmailDetail = async (id: number) => {
+  const fetchEmailDetail = async (id: number, type: string = 'system') => {
     loading.value = true
     try {
-      const response: any = await emailAPI.getEmail(id)
+      const response: any = await emailAPI.getEmail(id, type)
 
       if (response.code === 0 && response.data) {
         selectedEmail.value = response.data

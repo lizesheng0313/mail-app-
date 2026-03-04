@@ -1,7 +1,7 @@
 {
     "name": "mail-desktop",
     "version": "0.1.0",
-    "description": "邮件管理桌面客户端",
+    "description": "肥猫猫邮箱桌面客户端",
     "scripts": {
         "dev": "tauri dev",
         "build": "tauri build",

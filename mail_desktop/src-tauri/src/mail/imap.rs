@@ -1,4 +1,4 @@
-use crate::mail::types::{EmailData, FetchResult, LoginResult};
+use crate::mail::types::{AttachmentData, EmailData, FetchResult, LoginResult};
 use chrono::Utc;
 use log::{error, info};
 use std::io::{Read, Write};
@@ -223,7 +223,7 @@ fn fetch_single_email<T: Read + Write>(
         .map(|h| h.get_value())
         .unwrap_or_else(|| format!("<imap-{}@local>", uid));
 
-    let (content_text, content_html) = extract_content(&parsed);
+    let (content_text, content_html, attachments) = extract_content(&parsed);
 
     let now = Utc::now().timestamp_millis();
 
@@ -236,16 +236,77 @@ fn fetch_single_email<T: Read + Write>(
         content_html,
         email_date_ms: now,
         received_at_ms: now,
+        attachments,
     })
 }
 
-fn extract_content(mail: &mailparse::ParsedMail) -> (String, String) {
+fn extract_content(mail: &mailparse::ParsedMail) -> (String, String, Vec<AttachmentData>) {
     let mut content_text = String::new();
     let mut content_html = String::new();
+    let mut attachments = Vec::new();
 
     if mail.subparts.is_empty() {
         let content_type = mail.ctype.mimetype.as_str();
-        if let Ok(body) = mail.get_body() {
+        let disposition = mail
+            .headers
+            .iter()
+            .find(|h| h.get_key_ref().eq_ignore_ascii_case("Content-Disposition"))
+            .map(|h| h.get_value())
+            .unwrap_or_default();
+
+        let disposition_lower = disposition.to_lowercase();
+        let content_id = mail
+            .headers
+            .iter()
+            .find(|h| h.get_key_ref().eq_ignore_ascii_case("Content-ID"))
+            .map(|h| h.get_value())
+            .unwrap_or_default();
+
+        // 判断是否是附件：
+        // 1. Content-Disposition 明确为 attachment → 是附件
+        // 2. 非 text/multipart 但 Content-Disposition 为 inline 或有 Content-ID → 内嵌资源，不是附件
+        // 3. 非 text/multipart 且无 inline/Content-ID → 当作附件
+        let is_attachment = if disposition_lower.contains("attachment") {
+            true
+        } else if !content_type.starts_with("text/") && !content_type.starts_with("multipart/") {
+            !disposition_lower.contains("inline") && content_id.is_empty()
+        } else {
+            false
+        };
+
+        if is_attachment {
+            // 这是附件
+            if let Ok(body_raw) = mail.get_body_raw() {
+                if !body_raw.is_empty() && body_raw.len() <= 25 * 1024 * 1024 {
+                    let filename = mail
+                        .ctype
+                        .params
+                        .get("name")
+                        .cloned()
+                        .or_else(|| {
+                            // 从 Content-Disposition 提取 filename
+                            disposition
+                                .split(';')
+                                .find_map(|part| {
+                                    let part = part.trim();
+                                    if part.to_lowercase().starts_with("filename=") {
+                                        Some(part[9..].trim_matches('"').to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                        })
+                        .unwrap_or_else(|| "attachment".to_string());
+
+                    attachments.push(AttachmentData {
+                        filename,
+                        content_type: content_type.to_string(),
+                        size: body_raw.len(),
+                        data: body_raw,
+                    });
+                }
+            }
+        } else if let Ok(body) = mail.get_body() {
             if content_type.contains("text/plain") {
                 content_text = body;
             } else if content_type.contains("text/html") {
@@ -254,15 +315,16 @@ fn extract_content(mail: &mailparse::ParsedMail) -> (String, String) {
         }
     } else {
         for part in &mail.subparts {
-            let (text, html) = extract_content(part);
+            let (text, html, atts) = extract_content(part);
             if !text.is_empty() {
                 content_text = text;
             }
             if !html.is_empty() {
                 content_html = html;
             }
+            attachments.extend(atts);
         }
     }
 
-    (content_text, content_html)
+    (content_text, content_html, attachments)
 }

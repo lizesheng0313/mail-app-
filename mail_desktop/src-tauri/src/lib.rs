@@ -2,7 +2,7 @@
 mod commands;
 mod mail;
 
-use commands::{add_external_mailbox, check_for_update, download_and_install_update, fetch_emails, is_tauri};
+use commands::{add_external_mailbox, check_for_update, download_and_install_update, fetch_emails, is_tauri, open_local_attachment, get_attachment_path};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,6 +25,8 @@ pub fn run() {
             is_tauri,
             check_for_update,
             download_and_install_update,
+            open_local_attachment,
+            get_attachment_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -345,6 +345,17 @@ fn extract_mx_host(line: &str) -> Option<String> {
     None
 }
 
+/// 附件数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttachmentData {
+    pub filename: String,
+    pub content_type: String,
+    pub size: usize,
+    /// 附件二进制数据，仅内存中使用，不序列化到 JSON
+    #[serde(skip)]
+    pub data: Vec<u8>,
+}
+
 /// 邮件数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmailData {
@@ -356,6 +367,8 @@ pub struct EmailData {
     pub content_html: String,
     pub email_date_ms: i64,
     pub received_at_ms: i64,
+    #[serde(default)]
+    pub attachments: Vec<AttachmentData>,
 }
 
 /// 登录验证结果
