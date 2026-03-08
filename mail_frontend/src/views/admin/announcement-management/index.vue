@@ -185,6 +185,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { showMessage } from '@/utils/message'
+import api from '@/services/api'
 import AdminDataTable from '@/components/AdminDataTable/index.vue'
 import ConfirmDialog from '@/components/ConfirmDialog/index.vue'
 import CustomSelect from '@/components/CustomSelect/index.vue'
@@ -238,27 +239,10 @@ const formatDate = (timestamp) => {
 const loadAnnouncements = async () => {
   loading.value = true
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/announcements/?page=${page.value}&page_size=${pageSize.value}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    const result = await response.json()
+    const result = await api.get('/announcements/', { params: { page: page.value, page_size: pageSize.value } })
     if (result.code === 0) {
       announcements.value = result.data.items || []
       total.value = result.data.total || 0
-
-      // 调试：打印公告数据
-      console.log('管理后台公告列表:', result.data.items.map(item => ({
-        id: item.id,
-        title: item.title,
-        created_at: item.created_at,
-        created_at_type: typeof item.created_at,
-        formatted: formatDate(item.created_at),
-        date_object: new Date(item.created_at)
-      })))
     }
   } catch (error) {
     console.error('加载公告失败:', error)
@@ -311,21 +295,10 @@ const handleSave = async () => {
 
   saving.value = true
   try {
-    const token = localStorage.getItem('token')
-    const url = editingItem.value
-      ? `/mail-api/v1/announcements/${editingItem.value.id}`
-      : '/mail-api/v1/announcements/'
+    const result = editingItem.value
+      ? await api.put(`/announcements/${editingItem.value.id}`, formData.value)
+      : await api.post('/announcements/', formData.value)
 
-    const response = await fetch(url, {
-      method: editingItem.value ? 'PUT' : 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(formData.value)
-    })
-
-    const result = await response.json()
     if (result.code === 0) {
       showMessage(editingItem.value ? '更新成功' : '发布成功', 'success')
       closeModal()
@@ -359,15 +332,7 @@ const handleReset = () => {
 
 const handleDelete = async () => {
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/announcements/${deleteTarget.value.id}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    const result = await response.json()
+    const result = await api.delete(`/announcements/${deleteTarget.value.id}`)
     if (result.code === 0) {
       showMessage('删除成功', 'success')
       loadAnnouncements()

@@ -145,6 +145,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { showMessage } from '@/utils/message'
 import ActionButton from '@/components/ActionButton/index.vue'
+import api from '@/services/api'
 
 const route = useRoute()
 const loading = ref(false)
@@ -162,14 +163,7 @@ const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 const loadAnnouncements = async () => {
   loading.value = true
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/announcements/?page=${page.value}&page_size=${pageSize.value}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    const result = await response.json()
+    const result = await api.get('/announcements/', { params: { page: page.value, page_size: pageSize.value } })
     if (result.code === 0) {
       announcements.value = result.data.items || []
       total.value = result.data.total || 0
@@ -207,15 +201,7 @@ const viewDetail = async (announcement) => {
 // 标记为已读
 const markAsRead = async (announcementId) => {
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/announcements/${announcementId}/read`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    const result = await response.json()
+    const result = await api.post(`/announcements/${announcementId}/read`)
     if (result.code === 0) {
       // 更新本地状态
       const announcement = announcements.value.find(a => a.id === announcementId)

@@ -133,8 +133,20 @@ if [ -f "$SIG_FILE" ]; then
     SIGNATURE=$(cat "$SIG_FILE")
     PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
+    # 尝试从 GitHub Release 读取更新说明
+    echo "读取 GitHub Release 更新说明..."
+    RELEASE_BODY=$(gh release view "v${VERSION}" -R "lizesheng0313/mail-app" --json body -q .body 2>/dev/null || true)
+    if [ -z "$RELEASE_BODY" ]; then
+        RELEASE_BODY="邮件管理客户端 v${VERSION} 发布"
+        echo "⚠️ 未找到 GitHub Release，使用默认说明"
+    else
+        echo "✅ 已读取 GitHub Release 更新说明"
+    fi
+
+    NOTES=$(printf '%s' "$RELEASE_BODY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read(), ensure_ascii=False))')
+
     # 本地生成清单 JSON（扁平格式，因为 endpoint 已包含 {{target}}）
-    MANIFEST="{\"version\":\"${VERSION}\",\"notes\":\"新版本 v${VERSION} 发布\",\"pub_date\":\"${PUB_DATE}\",\"url\":\"https://zjkdongao.cn/downloads/${REMOTE_TAR_GZ_NAME}\",\"signature\":\"${SIGNATURE}\"}"
+    MANIFEST="{\"version\":\"${VERSION}\",\"notes\":${NOTES},\"pub_date\":\"${PUB_DATE}\",\"url\":\"https://zjkdongao.cn/downloads/${REMOTE_TAR_GZ_NAME}\",\"signature\":\"${SIGNATURE}\"}"
 
     # 上传清单（告诉旧版本的用户有新版本可用）
     echo "$MANIFEST" | ssh ${SERVER_USER}@${SERVER_HOST} "cat > ${UPDATE_PATH}/darwin-aarch64/${CURRENT_VERSION}"

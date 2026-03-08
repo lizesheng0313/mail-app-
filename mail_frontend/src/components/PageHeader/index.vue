@@ -275,6 +275,7 @@ import BaseIcon from '@/components/BaseIcon/index.vue'
 import { showMessage } from '@/utils/message'
 import { showAlert } from '@/utils/dialog'
 import { isTauri } from '@/services/api'
+import api from '@/services/api'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -329,14 +330,7 @@ const loadAnnouncements = async () => {
 
   announcementsLoading.value = true
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch('/mail-api/v1/announcements/?page=1&page_size=10', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    const result = await response.json()
+    const result = await api.get('/announcements/', { params: { page: 1, page_size: 10 } })
     if (result.code === 0) {
       announcements.value = result.data.items || []
       // 更新未读数量
@@ -354,14 +348,7 @@ const loadUnreadCount = async () => {
   if (!userStore.isAuthenticated) return
 
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch('/mail-api/v1/announcements/unread/count', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    const result = await response.json()
+    const result = await api.get('/announcements/unread/count')
     if (result.code === 0) {
       unreadCount.value = result.data.count || 0
     }
@@ -384,15 +371,7 @@ const viewAnnouncement = async (announcement: any) => {
 // 标记为已读
 const markAsRead = async (announcementId: number) => {
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch(`/mail-api/v1/announcements/${announcementId}/read`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-
-    const result = await response.json()
+    const result = await api.post(`/announcements/${announcementId}/read`)
     if (result.code === 0) {
       // 更新本地状态
       const announcement = announcements.value.find(a => a.id === announcementId)
