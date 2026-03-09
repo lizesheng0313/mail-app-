@@ -78,17 +78,17 @@ fi
 
 NOTES=$(printf '%s' "$RELEASE_BODY" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read(), ensure_ascii=False))')
 
-# macOS 更新清单
+# macOS 更新清单 (universal-apple-darwin)
 if [ -n "$SIG_FILE" ]; then
     SIGNATURE=$(cat "$SIG_FILE")
     PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     MANIFEST="{\"version\":\"${VERSION}\",\"notes\":${NOTES},\"pub_date\":\"${PUB_DATE}\",\"url\":\"https://zjkdongao.cn/downloads/mail-desktop.app.tar.gz\",\"signature\":\"${SIGNATURE}\"}"
-    echo "$MANIFEST" | ssh ${SERVER_USER}@${SERVER_HOST} "cat > ${UPDATE_PATH}/darwin-aarch64/latest"
-    echo "$MANIFEST" | ssh ${SERVER_USER}@${SERVER_HOST} "cat > ${UPDATE_PATH}/darwin-x86_64/latest"
+    ssh ${SERVER_USER}@${SERVER_HOST} "mkdir -p ${UPDATE_PATH}/universal-apple-darwin"
+    echo "$MANIFEST" | ssh ${SERVER_USER}@${SERVER_HOST} "cat > ${UPDATE_PATH}/universal-apple-darwin/latest"
     echo "✅ macOS 更新清单已生成（latest -> ${VERSION}）"
 fi
 
-# Windows 更新清单
+# Windows 更新清单 (x86_64-pc-windows-msvc)
 WIN_SIG=$(find "$TEMP_DIR" -name "*.nsis.zip.sig" | head -1)
 WIN_ZIP=$(find "$TEMP_DIR" -name "*.nsis.zip" ! -name "*.sig" | head -1)
 if [ -n "$WIN_SIG" ] && [ -n "$WIN_ZIP" ]; then
@@ -97,7 +97,8 @@ if [ -n "$WIN_SIG" ] && [ -n "$WIN_ZIP" ]; then
     PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     scp "$WIN_ZIP" ${SERVER_USER}@${SERVER_HOST}:${DOWNLOAD_PATH}/
     WIN_MANIFEST="{\"version\":\"${VERSION}\",\"notes\":${NOTES},\"pub_date\":\"${PUB_DATE}\",\"url\":\"https://zjkdongao.cn/downloads/${WIN_FILENAME}\",\"signature\":\"${WIN_SIGNATURE}\"}"
-    echo "$WIN_MANIFEST" | ssh ${SERVER_USER}@${SERVER_HOST} "cat > ${UPDATE_PATH}/windows-x86_64/latest"
+    ssh ${SERVER_USER}@${SERVER_HOST} "mkdir -p ${UPDATE_PATH}/x86_64-pc-windows-msvc"
+    echo "$WIN_MANIFEST" | ssh ${SERVER_USER}@${SERVER_HOST} "cat > ${UPDATE_PATH}/x86_64-pc-windows-msvc/latest"
     echo "✅ Windows 更新清单已生成（latest -> ${VERSION}）"
 fi
 
@@ -107,6 +108,4 @@ rm -rf "$TEMP_DIR"
 echo ""
 echo "============================================"
 echo "  ✅ 全部完成！版本: $VERSION"
-echo "  macOS 更新: latest -> ${VERSION}"
-echo "  Windows 更新: latest -> ${VERSION}"
 echo "============================================"

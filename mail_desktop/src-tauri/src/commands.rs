@@ -372,22 +372,16 @@ pub async fn check_for_update(app: tauri::AppHandle) -> Result<Option<UpdateInfo
     let current_version = app.package_info().version.to_string();
 
     let target = if cfg!(target_os = "macos") {
-        "darwin"
+        "universal-apple-darwin"
     } else if cfg!(target_os = "windows") {
-        "windows"
+        "x86_64-pc-windows-msvc"
     } else {
-        "linux"
-    };
-
-    let arch = if cfg!(target_arch = "aarch64") {
-        "aarch64"
-    } else {
-        "x86_64"
+        "x86_64-unknown-linux-gnu"
     };
 
     let url = format!(
-        "https://zjkdongao.cn/desktop-updates/{}-{}/latest",
-        target, arch
+        "https://zjkdongao.cn/desktop-updates/{}/latest",
+        target
     );
 
     info!("保底更新检查: {} (当前版本 {})", url, current_version);
