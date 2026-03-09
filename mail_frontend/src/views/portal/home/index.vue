@@ -425,15 +425,19 @@ const switchMailboxType = (type: 'system' | 'external') => {
   // 恢复目标Tab的选中邮件
   if (type === 'system') {
     mailStore.selectedEmail = systemSelectedEmail.value
-    // 切回系统邮箱时，确保自动刷新开启
-    if (!autoRefresh.isRunning) {
+    // 切回系统邮箱时，确保自动刷新开启，停止外部收取
+    if (!autoRefresh.isRunning.value) {
       autoRefresh.start()
     }
+    externalAutoFetch.stop()
   } else {
     mailStore.selectedEmail = externalSelectedEmail.value
-    
-    // 切换到外部邮箱时，停止系统邮箱的自动刷新
+
+    // 切换到外部邮箱时，停止系统邮箱的自动刷新，启动外部自动收取
     autoRefresh.stop()
+    if (!externalAutoFetch.isRunning.value) {
+      externalAutoFetch.start()
+    }
     
     // 加载外部邮箱列表
     if (externalMailboxListRef.value?.loadAccounts) {
@@ -443,6 +447,11 @@ const switchMailboxType = (type: 'system' | 'external') => {
     
     // 加载所有外部邮件
     loadAllExternalEmails()
+
+    // 切换过来时立即收取一次
+    if (isTauri() && !fetchingExternalEmails.value) {
+      fetchAllExternalEmails()
+    }
   }
 }
 
@@ -725,6 +734,16 @@ const autoRefresh = useAutoRefresh(async () => {
     }
   }
 }, 10)
+
+// 第三方邮箱自动收取（10分钟）
+const externalAutoFetch = useAutoRefresh(async () => {
+  if (mailboxType.value !== 'external') return
+  if (!userStore.isAuthenticated) return
+  if (fetchingExternalEmails.value) return
+  if (currentView.value === 'send-email') return
+
+  await fetchAllExternalEmails()
+}, 600)
 
 // 页面加载时获取数据并启动自动刷新
 onMounted(async () => {

@@ -3,6 +3,12 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
 import './style.css'
+import { isTauri } from '@/services/api'
+
+// 桌面端添加标识 class
+if (isTauri()) {
+  document.body.classList.add('is-tauri')
+}
 
 const app = createApp(App)
 

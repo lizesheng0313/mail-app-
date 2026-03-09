@@ -1,4 +1,4 @@
-import { ref, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 
 /**
  * 自动刷新
@@ -7,14 +7,17 @@ export function useAutoRefresh(callback: () => void | Promise<void>, intervalSec
   const countdown = ref(intervalSeconds)
   let timer: number | null = null
 
+  const isRunning = computed(() => timer !== null)
+
   const start = () => {
+    if (timer) return
     // 重置倒计时
     countdown.value = intervalSeconds
 
     // 使用单一定时器，每秒执行一次
     timer = window.setInterval(async () => {
       countdown.value--
-      
+
       // 倒计时到0时执行回调并重置
       if (countdown.value <= 0) {
         await callback()
@@ -38,6 +41,7 @@ export function useAutoRefresh(callback: () => void | Promise<void>, intervalSec
 
   return {
     countdown,
+    isRunning,
     start,
     stop
   }
