@@ -121,6 +121,10 @@ interface Props {
   emptyText?: string
 }
 
+type EmailIframeElement = HTMLIFrameElement & {
+  __mailObserver?: MutationObserver
+}
+
 const props = withDefaults(defineProps<Props>(), {
   title: '邮件详情',
   email: null,
@@ -250,18 +254,125 @@ ${html}
 </html>`
 }
 
+const SUPPORTED_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
+
+const resolveExternalUrl = (rawUrl?: string | null, baseUrl?: string) => {
+  if (!rawUrl) return null
+  const trimmed = rawUrl.trim()
+  if (!trimmed || trimmed.startsWith('#')) return null
+  if (/^(javascript|data|about):/i.test(trimmed)) return null
+
+  try {
+    const parsed = new URL(trimmed, baseUrl || window.location.href)
+    if (!SUPPORTED_EXTERNAL_PROTOCOLS.has(parsed.protocol)) return null
+    return parsed.toString()
+  } catch {
+    return null
+  }
+}
+
+const openExternalUrl = async (url: string) => {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('open_external_url', { url })
+    return
+  } catch (e) {
+    console.warn('Tauri 命令打开失败，尝试 plugin-shell:', e)
+  }
+
+  if (isTauri()) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-shell')
+      await open(url)
+      return
+    } catch (e) {
+      console.warn('plugin-shell 打开失败，尝试浏览器新标签页:', e)
+    }
+  }
+
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+const enhanceIframeLinks = (iframeDoc: Document) => {
+  const links = iframeDoc.querySelectorAll('a')
+  links.forEach((link) => {
+    if (!(link instanceof HTMLAnchorElement)) return
+    link.setAttribute('target', '_blank')
+    link.setAttribute('rel', 'noopener noreferrer')
+  })
+}
+
+const ensureDocumentClickInterceptor = (iframeDoc: Document) => {
+  const enhancedDoc = iframeDoc as Document & { __externalClickBound?: boolean }
+  if (enhancedDoc.__externalClickBound) return
+  enhancedDoc.__externalClickBound = true
+
+  iframeDoc.addEventListener('click', (event) => {
+    const targetNode = event.target as Node | null
+    const targetElement = targetNode instanceof Element ? targetNode : targetNode?.parentElement
+    if (!targetElement) return
+
+    const link = targetElement.closest('a')
+    if (!(link instanceof HTMLAnchorElement)) return
+
+    const url = resolveExternalUrl(link.getAttribute('href'), iframeDoc.baseURI)
+    if (!url) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    console.info('[mail-link-open]', url)
+    void openExternalUrl(url)
+  }, true)
+}
+
+const addIframeOpenHint = (embeddedFrame: HTMLIFrameElement, iframeDoc: Document) => {
+  if (embeddedFrame.dataset.externalHintBound === '1') return
+  embeddedFrame.dataset.externalHintBound = '1'
+
+  const url = resolveExternalUrl(embeddedFrame.getAttribute('src'), iframeDoc.baseURI)
+  if (!url) return
+
+  const hint = iframeDoc.createElement('a')
+  hint.href = url
+  hint.textContent = '嵌入页面可能无法直接操作，点此在系统浏览器打开'
+  hint.style.display = 'inline-block'
+  hint.style.marginBottom = '8px'
+  hint.style.padding = '6px 10px'
+  hint.style.borderRadius = '6px'
+  hint.style.background = '#e5f3ff'
+  hint.style.color = '#1d4ed8'
+  hint.style.textDecoration = 'none'
+  hint.style.fontSize = '12px'
+  hint.style.fontWeight = '600'
+
+  hint.addEventListener('click', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    void openExternalUrl(url)
+  }, true)
+
+  embeddedFrame.insertAdjacentElement('beforebegin', hint)
+}
+
+const setupIframeInteractiveElements = (iframeDoc: Document) => {
+  ensureDocumentClickInterceptor(iframeDoc)
+  enhanceIframeLinks(iframeDoc)
+
+  const embeddedFrames = iframeDoc.querySelectorAll('iframe')
+  embeddedFrames.forEach((embeddedFrame) => {
+    if (embeddedFrame instanceof HTMLIFrameElement) {
+      addIframeOpenHint(embeddedFrame, iframeDoc)
+    }
+  })
+}
+
 const adjustIframeHeight = (event: Event) => {
-  const iframe = event.target as HTMLIFrameElement
+  const iframe = event.target as EmailIframeElement
   try {
     const iframeDoc = iframe.contentWindow?.document
     if (!iframeDoc) return
 
-    // 给所有链接添加 target="_blank"，让它们在新标签页打开
-    const links = iframeDoc.querySelectorAll('a')
-    links.forEach((link) => {
-      link.setAttribute('target', '_blank')
-      link.setAttribute('rel', 'noopener noreferrer')
-    })
+    setupIframeInteractiveElements(iframeDoc)
 
     // 自动调整iframe高度以适应内容
     const resizeIframe = () => {
@@ -298,6 +409,18 @@ const adjustIframeHeight = (event: Event) => {
     images.forEach((img) => {
       img.onload = resizeIframe
     })
+
+    iframe.__mailObserver?.disconnect()
+    const observer = new MutationObserver(() => {
+      setupIframeInteractiveElements(iframeDoc)
+      resizeIframe()
+    })
+
+    observer.observe(iframeDoc.documentElement, {
+      childList: true,
+      subtree: true
+    })
+    iframe.__mailObserver = observer
   } catch (e) {
     // 跨域时无法访问iframe内容
     console.warn('无法访问iframe内容:', e)

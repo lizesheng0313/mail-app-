@@ -551,6 +551,25 @@ pub fn get_attachment_path(message_id: String, filename: String) -> Result<Strin
     Ok(file_path.to_string_lossy().to_string())
 }
 
+/// 用系统默认浏览器打开外部链接（桌面端用）
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let normalized = url.trim();
+    let lower = normalized.to_lowercase();
+
+    if !(lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("mailto:")
+        || lower.starts_with("tel:"))
+    {
+        return Err("不支持的链接协议".to_string());
+    }
+
+    info!("打开外部链接: {}", normalized);
+    open::that(normalized).map_err(|e| format!("打开外部链接失败: {}", e))?;
+    Ok(())
+}
+
 /// 通过本地 SMTP 发送邮件（桌面端专用，使用用户本机 IP）
 /// 前端调用：invoke('send_smtp_email', { fromEmail, password, smtpHost, smtpPort, toEmail, subject, content })
 #[tauri::command]
