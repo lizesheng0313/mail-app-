@@ -18,6 +18,18 @@
         </div>
 
         <div class="flex items-center gap-1.5 flex-shrink-0">
+          <!-- 搜索按钮 -->
+          <button
+            v-if="searchable && !showSearch"
+            @click="showSearch = true"
+            class="px-2 py-1 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded transition-colors"
+            title="搜索邮件"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+            </svg>
+          </button>
+
           <button
             v-if="!batchSelection.isBatchMode.value && emails.length > 0"
             @click="startBatchMode"
@@ -31,6 +43,36 @@
       </div>
     </div>
     
+    <!-- 搜索框 -->
+    <div v-if="searchable && showSearch" class="pb-3 mb-1">
+      <div class="relative flex items-center">
+        <svg class="absolute left-2.5 w-3.5 h-3.5 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <input
+          v-model="searchText"
+          type="text"
+          placeholder="搜索主题、发件人、内容..."
+          class="w-full pl-8 pr-8 py-1.5 text-sm border border-gray-200 rounded-lg outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-100 transition-colors"
+          @input="handleSearch"
+          @keyup.escape="clearSearch"
+          autofocus
+        />
+        <button
+          v-if="searchText"
+          @click="clearSearch"
+          class="absolute right-2 text-gray-400 hover:text-gray-600"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div v-if="searchText.trim()" class="mt-1.5 text-xs text-gray-400">
+        找到 {{ emails.length }} 条结果
+      </div>
+    </div>
+
     <!-- 邮件列表 -->
     <div class="flex-1 overflow-y-auto scrollbar-stable space-y-2">
       <slot 
@@ -73,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch, toRef } from 'vue'
+import { ref, watch, toRef } from 'vue'
 import { useBatchSelection } from '@/composables/useBatchSelection'
 import MultiSelectToolbar from '@/components/MultiSelectToolbar/index.vue'
 
@@ -90,21 +132,41 @@ interface Props {
   selectedId?: number | null
   emptyText?: string
   showPagination?: boolean
-  autoRefresh?: any  // 自动刷新对象
+  autoRefresh?: any
+  searchable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   title: '我的邮件',
   selectedId: null,
   emptyText: '暂无邮件',
-  showPagination: false
+  showPagination: false,
+  searchable: false
 })
 
 const emit = defineEmits<{
   'select': [email: Email]
   'batch-delete': [ids: number[]]
   'batch-mode-start': []
+  'search': [keyword: string]
 }>()
+
+const searchText = ref('')
+const showSearch = ref(false)
+let searchTimer: any = null
+
+const handleSearch = () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    emit('search', searchText.value.trim())
+  }, 400)
+}
+
+const clearSearch = () => {
+  searchText.value = ''
+  emit('search', '')
+  showSearch.value = false
+}
 
 // 批量选择逻辑 - 使用 toRef 保持响应式
 const batchSelection = useBatchSelection(toRef(props, 'emails'))
@@ -135,6 +197,7 @@ const cancelBatchMode = () => {
 }
 
 defineExpose({
-  cancelBatchMode
+  cancelBatchMode,
+  clearSearch
 })
 </script>

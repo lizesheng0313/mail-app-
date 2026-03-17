@@ -114,10 +114,12 @@
           :emails="mailStore.emails"
           :selectedId="mailStore.selectedEmail?.id"
           :showPagination="true"
+          :searchable="true"
           :autoRefresh="autoRefresh"
           @select="handleSelectEmail"
           @batch-delete="handleBatchDeleteEmails"
           @batch-mode-start="handleEmailBatchStart"
+          @search="handleSearchEmails"
         >
         <template #title-extra>
           <button
@@ -177,10 +179,12 @@
           :emails="externalEmails"
           :selectedId="selectedExternalEmailId"
           :showPagination="true"
+          :searchable="true"
           :autoRefresh="false"
           @select="handleSelectExternalEmail"
           @batch-delete="handleBatchDeleteExternalEmails"
           @batch-mode-start="handleEmailBatchStart"
+          @search="handleSearchExternalEmails"
         >
           <template #title-extra>
             <button
@@ -344,6 +348,7 @@ async function getTauriInvoke() {
   }
 }
 import { unifiedAPI } from '@/api/unified'
+import { emailAPI } from '@/api/email'
 
 const userStore = useUserStore()
 const mailboxStore = useMailboxStore()
@@ -712,15 +717,17 @@ const autoRefresh = useAutoRefresh(async () => {
 
   // 登录用户
   if (userStore.isAuthenticated) {
-    const params = {
+    const params: any = {
       page: mailStore.currentPage,
       page_size: 20,
       ...(showOnlyUnread.value ? { unread: true } : {})
     }
+    // 保持搜索关键词
+    if (mailStore.searchKeyword) params.search = mailStore.searchKeyword
     if (selectedMailboxId.value) {
       await mailStore.fetchMailboxEmails(selectedMailboxId.value, params, true)
     } else {
-      await mailStore.fetchUserEmails(mailStore.currentPage, 20, true, showOnlyUnread.value || undefined)
+      await mailStore.fetchUserEmails(mailStore.currentPage, 20, true, showOnlyUnread.value || undefined, mailStore.searchKeyword || undefined)
     }
   } else if (mailboxStore.tempMailbox?.id) {
     // 临时用户：用临时邮箱接口刷新
@@ -1103,18 +1110,46 @@ const formatDate = (date: string) => {
   return new Date(date).toLocaleString('zh-CN')
 }
 
+// 搜索系统邮件
+const handleSearchEmails = async (keyword: string) => {
+  mailStore.searchKeyword = keyword
+  const params: any = { page: 1, page_size: 20 }
+  if (showOnlyUnread.value) params.unread = true
+  if (keyword) params.search = keyword
+  if (selectedMailboxId.value) {
+    await mailStore.fetchMailboxEmails(selectedMailboxId.value, params)
+  } else {
+    await mailStore.fetchUserEmails(1, 20, false, showOnlyUnread.value || undefined, keyword || undefined)
+  }
+}
+
+// 搜索外部邮件
+const handleSearchExternalEmails = async (keyword: string) => {
+  const params: any = { page: 1, page_size: 20, type: 'external' }
+  if (showOnlyUnreadExternal.value) params.unread = true
+  if (keyword) params.search = keyword
+  if (selectedExternalMailboxId.value) {
+    params.mailbox_id = selectedExternalMailboxId.value
+  }
+  const res = await emailAPI.getUserEmails(params)
+  if (res.code === 0 && res.data) {
+    externalEmails.value = res.data.emails || []
+  }
+}
+
 // 切换分页
 const handlePageChange = async (page: number) => {
   mailStore.currentPage = page
-  const params = {
+  const params: any = {
     page,
     page_size: 20,
     ...(showOnlyUnread.value ? { unread: true } : {})
   }
+  if (mailStore.searchKeyword) params.search = mailStore.searchKeyword
   if (selectedMailboxId.value) {
     await mailStore.fetchMailboxEmails(selectedMailboxId.value, params)
   } else {
-    await mailStore.fetchUserEmails(page, 20, false, showOnlyUnread.value || undefined)
+    await mailStore.fetchUserEmails(page, 20, false, showOnlyUnread.value || undefined, mailStore.searchKeyword || undefined)
   }
 }
 

@@ -121,6 +121,7 @@
                 <tr>
                   <th v-if="isPublishedWorkflow" class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">交易号</th>
                   <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">执行者</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">触发邮件</th>
                   <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">状态</th>
                   <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">耗时</th>
                   <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">开始时间</th>
@@ -134,6 +135,17 @@
                   </td>
                   <td class="px-6 py-4">
                     <div class="text-sm text-black">{{ execution.executor_name || '-' }}</div>
+                  </td>
+                  <td class="px-6 py-4">
+                    <template v-if="execution.email_id">
+                      <div class="text-sm text-black truncate max-w-[200px]" :title="execution.email_subject">
+                        {{ execution.email_subject || '(无主题)' }}
+                      </div>
+                      <div class="text-xs text-gray-400 mt-0.5">
+                        {{ formatTime(execution.email_received_at) }}
+                      </div>
+                    </template>
+                    <span v-else class="text-sm text-gray-300">-</span>
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap">
                     <span :class="getStatusColor(execution.status)" class="inline-flex px-2 py-1 text-xs font-semibold rounded-full">

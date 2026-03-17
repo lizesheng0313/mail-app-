@@ -11,6 +11,7 @@ export const useMailStore = defineStore('mail', () => {
   const currentPage = ref(1)
   const pageSize = ref(20)
   const totalPages = ref(0)
+  const searchKeyword = ref('')
 
   // 获取指定邮箱的所有邮件
   const fetchMailboxEmails = async (mailboxId: number, params?: any, silent: boolean = false, signal?: AbortSignal) => {
@@ -41,12 +42,15 @@ export const useMailStore = defineStore('mail', () => {
   }
 
   // 获取当前用户所有邮件（分页）
-  const fetchUserEmails = async (page: number = 1, pageSize: number = 20, silent: boolean = false, unread?: boolean) => {
+  const fetchUserEmails = async (page: number = 1, pageSize: number = 20, silent: boolean = false, unread?: boolean, search?: string) => {
     if (!silent) loading.value = true
     try {
       const params: any = { page, page_size: pageSize }
       if (unread === true) {
         params.unread = true
+      }
+      if (search && search.trim()) {
+        params.search = search.trim()
       }
       
       const response: any = await emailAPI.getUserEmails(params)
@@ -189,6 +193,7 @@ export const useMailStore = defineStore('mail', () => {
     totalPages,
     currentPage,
     pageSize,
+    searchKeyword,
     fetchUserEmails,
     fetchMailboxEmails,
     fetchEmailDetail,
