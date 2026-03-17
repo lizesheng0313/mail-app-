@@ -294,11 +294,11 @@ pub async fn fetch_emails(
         // 同步到远程服务器（附件 data 字段会被 serde(skip) 跳过，只发元数据）
         match sync_emails_to_server(&server_url, &token, mailbox_id, &result.emails).await {
             Ok(new_count) => {
-                // 用后端去重后的实际新增数替换总数
+                // 用后端去重后的实际新增数替换总数，emails 不通过 IPC 返回（内容太大）
                 return Ok(FetchResult {
                     success: true,
                     message: format!("收取成功，新增 {} 封邮件", new_count),
-                    emails: result.emails,
+                    emails: vec![],
                     count: new_count,
                 });
             }
@@ -309,7 +309,10 @@ pub async fn fetch_emails(
         }
     }
 
-    Ok(result)
+    Ok(FetchResult {
+        emails: vec![],
+        ..result
+    })
 }
 
 /// 同步邮件到远程服务器，返回实际新增数量
