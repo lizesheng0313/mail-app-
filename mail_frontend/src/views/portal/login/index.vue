@@ -292,11 +292,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import authAPI from '@/api/auth'
 import BaseInput from '@/components/BaseInput/index.vue'
 import { showMessage } from '@/utils/message'
+import { isTauri } from '@/services/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -515,8 +517,7 @@ const loginWithGoogle = async () => {
     error.value = ''
     
     // 获取 Google 授权 URL
-    const response = await fetch('/mail-api/v1/auth/google/login-url')
-    const result = await response.json()
+    const result = await authAPI.getGoogleLoginUrl({ is_desktop: isTauri() })
     
     if (result.code === 0) {
       // 跳转到 Google 授权页面
@@ -536,6 +537,16 @@ onMounted(() => {
   // 如果URL包含 mode=register 参数，切换到注册模式
   if (route.query.mode === 'register') {
     isLoginMode.value = false
+  }
+
+  if (typeof route.query.error === 'string' && route.query.error) {
+    error.value = route.query.error
+  }
+})
+
+watch(() => route.query.error, (queryError) => {
+  if (typeof queryError === 'string') {
+    error.value = queryError
   }
 })
 </script>

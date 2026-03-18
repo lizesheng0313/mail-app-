@@ -27,7 +27,14 @@ export const authAPI = {
   logout: () => api.post('/auth/logout'),
 
   // 获取允许的邮箱域名
-  getAllowedDomains: () => api.get('/auth/allowed-domains')
+  getAllowedDomains: () => api.get('/auth/allowed-domains'),
+
+  // Google 登录/绑定
+  getGoogleLoginUrl: (params = {}) => api.get('/auth/google/login-url', { params }),
+  getGoogleBindStatus: () => api.get('/auth/google/status'),
+  unbindGoogle: () => api.post('/auth/google/unbind'),
+  createGoogleAccount: (data) => api.post('/auth/google/create-account', data),
+  bindExistingGoogle: (data) => api.post('/auth/google/bind-existing', data)
 }
 
 // 导出个别函数供测试使用

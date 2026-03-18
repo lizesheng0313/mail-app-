@@ -103,7 +103,6 @@
         
         <!-- 底部按钮 -->
         <div class="px-5 py-3 border-t border-gray-200 flex justify-end gap-3 bg-gray-50">
-          <p v-if="!isDesktop" class="mr-auto flex items-center gap-2 text-xs text-amber-600">第三方邮箱批量添加仅支持桌面端，请下载桌面客户端使用。<button type="button" class="px-2 py-0.5 text-xs rounded border border-primary-500 text-primary-600 hover:bg-primary-50" @click="downloadDesktop">下载桌面端</button></p>
           <button
             @click="$emit('close')"
             :disabled="loading"
@@ -112,8 +111,8 @@
             取消
           </button>
           <button
-            @click="isDesktop && handleSubmit()"
-            :disabled="!isDesktop || loading || !accountsText.trim()"
+            @click="handleSubmit()"
+            :disabled="loading || !accountsText.trim()"
             class="px-5 py-2 text-sm text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
           >
             <svg

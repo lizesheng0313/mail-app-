@@ -79,7 +79,25 @@ export const batchLoginAPI = {
       mailbox_id: mailboxId,
       status,
       error_message: errorMessage
-    })
+    }),
+
+  // ========== OAuth2 相关 ==========
+
+  // 获取支持的 OAuth2 平台列表
+  getOAuth2Providers: () =>
+    api.get('/oauth2/providers'),
+
+  // 获取 OAuth2 授权 URL
+  getOAuth2AuthUrl: (provider, isDesktop = false) =>
+    api.get(`/oauth2/${provider}/auth-url`, { params: { is_desktop: isDesktop } }),
+
+  // 手动刷新 OAuth2 token
+  refreshOAuth2Token: (mailboxId) =>
+    api.post(`/oauth2/mailboxes/${mailboxId}/refresh`),
+
+  // 用 OAuth2 拉取邮件
+  fetchOAuth2Emails: (mailboxId) =>
+    api.post(`/oauth2/mailboxes/${mailboxId}/fetch`)
 }
 
 export default batchLoginAPI

@@ -5,41 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri_plugin_updater::UpdaterExt;
 
-/// 添加外部邮箱请求
-#[derive(Debug, Deserialize)]
-pub struct AddExternalMailboxRequest {
-    pub email: String,
-    pub password: String,
-    pub protocol: String, // "imap" 或 "pop3"
-    pub host: Option<String>,
-    pub port: Option<u16>,
-}
-
-/// 收取邮件请求
-#[derive(Debug, Deserialize)]
-pub struct FetchEmailsRequest {
-    pub mailbox_id: i64,
-    pub email: String,
-    pub password: String,
-    pub protocol: String,
-    pub host: String,
-    pub port: u16,
-    pub token: String, // 用于同步到远程服务器
-}
-
 /// 同步邮件请求（发送到远程服务器）
 #[derive(Debug, Serialize)]
 pub struct SyncEmailsRequest {
     pub mailbox_id: i64,
     pub emails: Vec<EmailData>,
-}
-
-/// API 响应
-#[derive(Debug, Serialize)]
-pub struct ApiResponse<T> {
-    pub success: bool,
-    pub message: String,
-    pub data: Option<T>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -288,6 +258,8 @@ pub async fn fetch_emails(
     };
 
     if result.success && !result.emails.is_empty() {
+        save_attachments_locally(&result.emails);
+
         // 同步到远程服务器（附件 data 字段会被 serde(skip) 跳过，只发元数据）
         match sync_emails_to_server(&server_url, &token, mailbox_id, &result.emails).await {
             Ok(new_count) => {

@@ -1,0 +1,18 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /user/
+Disallow: /profile
+Disallow: /feedback
+Disallow: /plugins
+Disallow: /plugin-store
+Disallow: /automation/
+Disallow: /workflows/
+Disallow: /proxy
+Disallow: /payment
+Disallow: /purchase
+Disallow: /login
+Disallow: /auth/google/
+Disallow: /share/
+
+Sitemap: https://zjkdongao.cn/sitemap.xml

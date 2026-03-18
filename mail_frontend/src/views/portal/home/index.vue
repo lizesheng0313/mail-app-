@@ -71,6 +71,60 @@
           </button>
         </div>
       </div>
+      <section
+        v-else
+        class="rounded-2xl border border-gray-100 bg-white px-6 py-6 shadow-sm"
+      >
+        <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:items-start">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary-600">
+              邮箱管理 · 第三方邮箱接入 · 邮件自动化
+            </p>
+            <h1 class="mt-3 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
+              肥猫猫：邮箱管理与邮件自动化平台
+            </h1>
+            <p class="mt-4 max-w-3xl text-base leading-7 text-gray-600">
+              提供邮箱管理、第三方邮箱接入、邮件验证码提取、批量收发、工作流市场和桌面端管理能力，
+              帮助个人与团队统一处理多邮箱、收件箱协作和邮件自动化任务。
+            </p>
+            <div class="mt-5 flex flex-wrap gap-3">
+              <a
+                href="/market"
+                class="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700"
+              >
+                浏览工作流市场
+              </a>
+              <a
+                href="/download"
+                class="inline-flex items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-400 hover:bg-gray-50"
+              >
+                下载桌面端
+              </a>
+              <a
+                href="/about"
+                class="inline-flex items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-400 hover:bg-gray-50"
+              >
+                了解产品
+              </a>
+            </div>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+            <div class="rounded-xl bg-primary-50 px-4 py-3">
+              <div class="text-xs font-semibold uppercase tracking-wide text-primary-700">多邮箱管理</div>
+              <p class="mt-2 text-sm text-primary-900">统一查看和处理系统邮箱与业务邮箱，减少多端切换成本。</p>
+            </div>
+            <div class="rounded-xl bg-gray-50 px-4 py-3">
+              <div class="text-xs font-semibold uppercase tracking-wide text-gray-700">第三方邮箱支持</div>
+              <p class="mt-2 text-sm text-gray-700">支持接入常见第三方邮箱账号，集中收件、发件和状态管理。</p>
+            </div>
+            <div class="rounded-xl bg-gray-50 px-4 py-3">
+              <div class="text-xs font-semibold uppercase tracking-wide text-gray-700">自动化与工作流</div>
+              <p class="mt-2 text-sm text-gray-700">结合工作流市场与桌面端能力，把重复邮件任务变成可复用流程。</p>
+            </div>
+          </div>
+        </div>
+      </section>
     </template>
 
     <!-- 左栏：邮箱 -->
@@ -290,6 +344,25 @@
     @submit="handleBatchAddAccounts"
   />
 
+  <!-- OAuth2 授权弹窗 -->
+  <OAuth2AuthModal
+    :visible="showOAuth2Modal"
+    :pending-accounts="pendingOAuthAccounts"
+    @close="showOAuth2Modal = false"
+    @complete="handleOAuth2Complete"
+  />
+
+  <!-- 下载桌面端提示弹窗 -->
+  <ConfirmDialog
+    :visible="showDownloadDialog"
+    title="需要桌面端"
+    message="普通邮箱（163/QQ等）需要桌面端验证登录，是否下载桌面客户端？"
+    confirm-text="下载桌面端"
+    cancel-text="取消"
+    @confirm="window.location.href = 'https://zjkdongao.cn/download'; showDownloadDialog = false"
+    @cancel="showDownloadDialog = false"
+  />
+
   <!-- 分享邮箱弹窗 -->
   <ShareMailboxModal
     :visible="showShareModal"
@@ -322,6 +395,7 @@ import ExternalMailboxList from '@/components/Mail/ExternalMailbox/MailboxList.v
 import EmailList from '@/components/Mail/EmailList/EmailList.vue'
 import EmailItem from '@/components/Mail/EmailItem.vue'
 import BatchAddAccountModal from '@/components/Mail/BatchAddAccountModal.vue'
+import OAuth2AuthModal from '@/components/Mail/OAuth2AuthModal.vue'
 import ShareMailboxModal from '@/components/Mail/ShareMailboxModal.vue'
 import SendEmailModal from '@/components/Mail/SendEmailModal.vue'
 import batchLoginAPI from '@/api/batchLogin'
@@ -368,6 +442,9 @@ const showEmailModal = ref(false)
 const modalEmail = ref<any>(null)
 const showBatchAddModal = ref(false)
 const batchAddModalRef = ref<any>(null)
+const showOAuth2Modal = ref(false)
+const pendingOAuthAccounts = ref<Array<{ email: string, provider: string }>>([])
+const showDownloadDialog = ref(false)
 const showDeleteConfirm = ref(false)
 const deleting = ref(false)
 const deletingIds = ref<number[]>([])
@@ -467,6 +544,22 @@ const handleBatchLogin = () => {
   showBatchAddModal.value = true
 }
 
+// OAuth2 授权登录（Outlook / Gmail）
+const handleOAuth2Login = async (provider: string) => {
+  try {
+    const res = await batchLoginAPI.getOAuth2AuthUrl(provider)
+    if (res.code === 0 && res.data?.auth_url) {
+      // 打开授权页面
+      window.open(res.data.auth_url, '_blank')
+      showMessage(`正在打开${provider === 'microsoft' ? 'Outlook' : 'Gmail'}授权页面...`, 'success')
+    } else {
+      showMessage(res.message || '获取授权链接失败', 'error')
+    }
+  } catch (e: any) {
+    showMessage(e.message || '获取授权链接失败', 'error')
+  }
+}
+
 // 处理分享邮箱
 const handleShareMailboxes = (mailboxes: any[]) => {
   console.log('🔵 首页 - 处理分享邮箱', mailboxes)
@@ -535,22 +628,41 @@ const handleEmailSent = () => {
 const handleBatchAddAccounts = async (accounts: any[]) => {
   batchLoginLoading.value = true
 
-  // 初始化结果列表
+  // OAuth2 需要授权的邮箱后缀
+  const OAUTH2_DOMAINS: Record<string, string> = {
+    'gmail.com': 'google',
+    'googlemail.com': 'google',
+    'outlook.com': 'microsoft',
+    'hotmail.com': 'microsoft',
+    'live.com': 'microsoft',
+    'live.cn': 'microsoft',
+    'msn.com': 'microsoft',
+  }
+
+  // 初始化结果列表（全部邮箱）
   if (batchAddModalRef.value) {
     batchAddModalRef.value.initResults(accounts.map((a: any) => a.email))
   }
 
+  // 清空待授权列表
+  pendingOAuthAccounts.value = []
+
   try {
     let successCount = 0
     let failCount = 0
+    let needDesktopDownload = false
 
+    // 所有邮箱都先尝试密码登录
     for (const account of accounts) {
+      const domain = account.email.split('@')[1]?.toLowerCase()
+      const oauthProvider = domain ? OAUTH2_DOMAINS[domain] : null
+
       try {
         // 传递完整的账号数据（包括协议和自定义服务器配置）
         const accountData: any = {
           email: account.email,
           password: account.password,
-          protocol: account.protocol || 'pop3'
+          protocol: account.protocol || 'imap'  // Gmail/Outlook 默认用 imap
         }
 
         // 如果有自定义POP3配置
@@ -643,43 +755,72 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
             }
           } catch (error: any) {
             console.error('❌ 桌面端验证失败:', error)
-            failCount++
-            if (batchAddModalRef.value) {
-              batchAddModalRef.value.updateResult(account.email, 'error', error.message || error.toString())
+            // 如果是 OAuth2 邮箱，加入待授权列表
+            if (oauthProvider) {
+              pendingOAuthAccounts.value.push({ email: account.email, provider: oauthProvider })
+              if (batchAddModalRef.value) {
+                batchAddModalRef.value.updateResult(account.email, 'error', '密码登录失败，需要OAuth2授权')
+              }
+            } else {
+              failCount++
+              if (batchAddModalRef.value) {
+                batchAddModalRef.value.updateResult(account.email, 'error', error.message || error.toString())
+              }
             }
           }
         } else {
-          // Web 端：直接调用后端 API（使用服务器 IP）
-          console.log('🔴 Web 端：使用服务器 IP 验证邮箱')
-          const response = await batchLoginAPI.addAccount(accountData)
-          if (response.code === 0) {
-            successCount++
+          // Web 端
+          if (oauthProvider) {
+            // OAuth2 邮箱：直接加入待授权列表，不尝试密码登录
+            console.log('🔵 Web 端：OAuth2 邮箱直接走授权流程')
+            pendingOAuthAccounts.value.push({ email: account.email, provider: oauthProvider })
             if (batchAddModalRef.value) {
-              batchAddModalRef.value.updateResult(account.email, 'success', '⚠️ 服务器验证')
+              batchAddModalRef.value.updateResult(account.email, 'error', '需要 OAuth2 授权')
             }
           } else {
+            // 普通邮箱：Web 端不支持，提示下载桌面端
+            console.log('🔴 Web 端：普通邮箱需要桌面端验证')
             failCount++
+            needDesktopDownload = true
             if (batchAddModalRef.value) {
-              batchAddModalRef.value.updateResult(account.email, 'error', response.message)
+              batchAddModalRef.value.updateResult(account.email, 'error', '需下载桌面端添加')
             }
           }
         }
       } catch (error: any) {
         console.error(`添加账号 ${account.email} 失败:`, error)
-        failCount++
-        if (batchAddModalRef.value) {
-          batchAddModalRef.value.updateResult(account.email, 'error', error.response?.data?.message || error.message)
+        // 如果是 OAuth2 邮箱，加入待授权列表
+        if (oauthProvider) {
+          pendingOAuthAccounts.value.push({ email: account.email, provider: oauthProvider })
+          if (batchAddModalRef.value) {
+            batchAddModalRef.value.updateResult(account.email, 'error', '密码登录失败，需要OAuth2授权')
+          }
+        } else {
+          failCount++
+          if (batchAddModalRef.value) {
+            batchAddModalRef.value.updateResult(account.email, 'error', error.response?.data?.message || error.message)
+          }
         }
       }
     }
 
-    // 全部成功时显示提示,但不自动关闭弹窗,让用户看到结果
-    if (failCount === 0 && successCount > 0) {
-      showMessage(`全部登录成功，共添加 ${successCount} 个邮箱`, 'success')
+    // 如果有需要 OAuth2 授权的邮箱，弹出授权组件
+    if (pendingOAuthAccounts.value.length > 0) {
+      showMessage(`${pendingOAuthAccounts.value.length} 个邮箱需要OAuth2授权`, 'warning')
+      showOAuth2Modal.value = true
     }
-    // 部分失败或全部失败时不显示提示，结果已经在弹窗右侧显示了
 
-    // 只要有成功的，就刷新列表
+    // 显示结果
+    if (successCount > 0) {
+      showMessage(`密码登录成功 ${successCount} 个邮箱`, 'success')
+    }
+    
+    // 如果有普通邮箱需要桌面端，提示下载
+    if (needDesktopDownload) {
+      showDownloadDialog.value = true
+    }
+
+    // 刷新列表
     if (successCount > 0 && externalMailboxListRef.value?.loadAccounts) {
       await externalMailboxListRef.value.loadAccounts()
     }
@@ -694,6 +835,24 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
     showMessage('批量添加账号失败', 'error')
   } finally {
     batchLoginLoading.value = false
+  }
+}
+
+// OAuth2 授权完成的回调
+const handleOAuth2Complete = async (result: { successCount: number, failCount: number }) => {
+  showOAuth2Modal.value = false
+  pendingOAuthAccounts.value = []
+  
+  if (result.successCount > 0) {
+    showMessage(`OAuth2授权完成: ${result.successCount} 个成功`, 'success')
+    
+    // 刷新邮箱列表
+    if (externalMailboxListRef.value?.loadAccounts) {
+      await externalMailboxListRef.value.loadAccounts()
+    }
+    await loadSmtpAccounts()
+  } else if (result.failCount > 0) {
+    showMessage(`OAuth2授权失败: ${result.failCount} 个`, 'error')
   }
 }
 

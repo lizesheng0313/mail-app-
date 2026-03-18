@@ -4,16 +4,6 @@ use std::net::TcpStream;
 use std::process::Command;
 use std::time::Duration;
 
-/// 邮箱登录配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MailboxConfig {
-    pub email: String,
-    pub password: String,
-    pub protocol: String, // "imap" 或 "pop3"
-    pub host: Option<String>,
-    pub port: Option<u16>,
-}
-
 /// 邮箱服务器配置（字段改为 String 以支持动态探测）
 #[derive(Debug, Clone)]
 pub struct ServerConfig {

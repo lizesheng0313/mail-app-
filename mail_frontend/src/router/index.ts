@@ -4,7 +4,6 @@ import { useUserStore } from '@/stores/user'
 // 普通用户页面组件 - 懒加载
 const Dashboard = () => import('@/views/portal/home/index.vue')
 const Login = () => import('@/views/portal/login/index.vue')
-const GoogleCallback = () => import('@/views/portal/auth/GoogleCallback.vue')
 const GoogleSuccess = () => import('@/views/portal/auth/GoogleSuccess.vue')
 const GoogleChoose = () => import('@/views/portal/auth/GoogleChoose.vue')
 const Profile = () => import('@/views/portal/profile/index.vue')
@@ -60,12 +59,14 @@ const router = createRouter({
     {
       path: '/login',
       name: 'login',
-      component: Login
-    },
-    {
-      path: '/auth/google/callback',
-      name: 'google-callback',
-      component: GoogleCallback
+      component: Login,
+      meta: {
+        seo: {
+          title: '登录肥猫猫',
+          description: '登录肥猫猫，统一管理邮箱、第三方邮箱接入和邮件自动化工作流。',
+          canonicalPath: '/login'
+        }
+      }
     },
     {
       path: '/auth/google/success',
@@ -80,7 +81,17 @@ const router = createRouter({
     {
       path: '/',
       name: 'dashboard',
-      component: Dashboard
+      component: Dashboard,
+      meta: {
+        seo: {
+          title: '肥猫猫 - 邮箱管理、第三方邮箱接入与邮件自动化平台',
+          description:
+            '肥猫猫提供邮箱管理、第三方邮箱接入、批量收发、工作流市场和邮件自动化工具，帮助个人和团队更高效地处理多邮箱任务。',
+          keywords:
+            '邮箱管理,第三方邮箱,邮件自动化,多邮箱管理,邮件工具,工作流市场,workflow marketplace',
+          canonicalPath: '/'
+        }
+      }
     },
     // 个人中心 - 包含Google账号绑定
     {
@@ -157,18 +168,44 @@ const router = createRouter({
     {
       path: '/about',
       name: 'about',
-      component: AboutPage
+      component: AboutPage,
+      meta: {
+        seo: {
+          title: '关于肥猫猫 - 邮箱管理与邮件自动化平台',
+          description:
+            '了解肥猫猫的产品定位与服务能力。我们提供邮箱管理、第三方邮箱接入、工作流市场和邮件自动化解决方案。',
+          keywords: '关于我们, 邮箱管理, 第三方邮箱, 邮件自动化, 工作流市场, 肥猫猫',
+          canonicalPath: '/about'
+        }
+      }
     },
     // 工作流市场（无需登录即可浏览，购买时才需要登录）
     {
       path: '/market',
       name: 'workflow-market',
-      component: WorkflowMarket
+      component: WorkflowMarket,
+      meta: {
+        seo: {
+          title: '工作流市场 - 邮箱管理与邮件自动化模板',
+          description:
+            '在肥猫猫工作流市场浏览邮箱管理、邮件自动化模板、插件与数字资源，快速找到适合第三方邮箱接入、收发处理和数据流转的工作流。',
+          keywords: '工作流市场, 邮箱管理模板, 邮件自动化模板, 数字资源, 插件市场, workflow marketplace',
+          canonicalPath: '/market'
+        }
+      }
     },
     {
       path: '/market/workflow/:id',
       name: 'workflow-detail',
-      component: WorkflowDetail
+      component: WorkflowDetail,
+      meta: {
+        seo: {
+          title: '工作流详情 - 邮件自动化模板',
+          description:
+            '查看工作流模板的功能说明、价格、作者信息和用户评价，判断它是否适合你的邮件自动化场景。',
+          keywords: '工作流详情, 邮件自动化模板, 工作流市场, 肥猫猫'
+        }
+      }
     },
 
     // 邮箱分享页面（无需登录）
@@ -182,7 +219,16 @@ const router = createRouter({
     {
       path: '/download',
       name: 'download',
-      component: DownloadPage
+      component: DownloadPage,
+      meta: {
+        seo: {
+          title: '下载邮箱管理客户端 - macOS 与 Windows',
+          description:
+            '下载肥猫猫邮箱管理客户端，支持 macOS 和 Windows，方便进行第三方邮箱接入、多邮箱管理、邮件收取和自动化处理。',
+          keywords: '邮箱管理客户端, macOS 邮件客户端, Windows 邮件客户端, 第三方邮箱, 肥猫猫下载',
+          canonicalPath: '/download'
+        }
+      }
     },
 
     // 用户中心

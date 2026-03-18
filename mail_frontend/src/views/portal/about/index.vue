@@ -18,7 +18,7 @@
               </div>
             </div>
             <h1 class="mt-6 text-center text-4xl font-bold">关于我们</h1>
-            <p class="mt-3 text-center text-primary-100">邮件服务管理系统</p>
+            <p class="mt-3 text-center text-primary-100">邮箱管理与邮件自动化平台</p>
           </div>
 
           <!-- 内容区域 -->
@@ -27,8 +27,8 @@
             <div class="mb-10">
               <h2 class="mb-4 text-2xl font-bold text-gray-800">简介</h2>
               <p class="text-gray-600 leading-relaxed">
-                这是一个专业的邮件服务管理系统，提供邮箱管理、自动化工作流、插件扩展等功能。
-                我们致力于为用户提供高效、稳定、易用的邮件服务解决方案。
+                这是一个面向个人与团队的邮箱管理平台，提供第三方邮箱接入、多邮箱统一处理、邮件自动化工作流与插件扩展等功能。
+                我们致力于为用户提供高效、稳定、易用的邮件管理与协作解决方案。
               </p>
             </div>
 

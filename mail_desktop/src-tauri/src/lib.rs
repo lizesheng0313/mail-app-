@@ -1,8 +1,10 @@
 // 模块声明
 mod commands;
 mod mail;
+mod oauth_callback_server;
 
 use commands::{add_external_mailbox, check_for_update, download_and_install_update, fetch_emails, is_tauri, open_local_attachment, get_attachment_path, open_external_url, send_smtp_email};
+use oauth_callback_server::start_oauth_callback_server;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -41,6 +43,7 @@ pub fn run() {
                     .level(log::LevelFilter::Info)
                     .build(),
             )?;
+            start_oauth_callback_server(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

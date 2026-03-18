@@ -299,7 +299,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getWorkflowDetail } from '@/api/workflowMarket'
 import { createReview, deleteReview } from '@/api/workflowMarket'
@@ -314,6 +314,7 @@ import ExecutionHistoryModal from '@/views/portal/workflows/components/Execution
 import ActionButton from '@/components/ActionButton/index.vue'
 import ImagePreview from '@/components/ImagePreview/index.vue'
 import { useUserStore } from '@/stores/user'
+import { setPageSeo } from '@/seo'
 
 const route = useRoute()
 const router = useRouter()
@@ -339,6 +340,29 @@ const newRating = ref(5)
 // 截图验证
 const validScreenshots = ref([])
 const hasValidScreenshots = computed(() => validScreenshots.value.length > 0)
+
+const stripHtml = (value = '') => value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+
+const updateWorkflowSeo = () => {
+  if (!workflow.value) {
+    return
+  }
+
+  const workflowName = workflow.value.name || '工作流详情'
+  const workflowDescription =
+    workflow.value.description ||
+    stripHtml(workflow.value.long_description || '') ||
+    '查看工作流模板的功能说明、价格、作者信息和用户评价。'
+  const keywordList = Array.isArray(workflow.value.keywords) ? workflow.value.keywords.filter(Boolean) : []
+
+  setPageSeo({
+    title: `${workflowName} - 工作流详情 | 肥猫猫`,
+    description: workflowDescription.slice(0, 160),
+    keywords: ['工作流详情', '邮件自动化', workflowName, ...keywordList].join(', '),
+    canonicalPath: route.path,
+    ogType: 'website'
+  })
+}
 
 const handleImageError = (event, index) => {
   // 图片加载失败时从有效截图列表中移除
@@ -369,6 +393,7 @@ const loadWorkflowDetail = async (showLoading = true) => {
     
     if (res.code === 0) {
       workflow.value = res.data
+      updateWorkflowSeo()
 
       console.log('🔍 调试信息:', {
         author_id: res.data.author_id,
@@ -669,4 +694,13 @@ const deleteReviewById = async (reviewId) => {
 onMounted(() => {
   loadWorkflowDetail()
 })
+
+watch(
+  () => route.params.id,
+  (newId, oldId) => {
+    if (newId !== oldId) {
+      loadWorkflowDetail()
+    }
+  }
+)
 </script>

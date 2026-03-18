@@ -132,6 +132,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import authAPI from '@/api/auth'
 
 const router = useRouter()
 const route = useRoute()
@@ -167,20 +168,12 @@ const createNewAccount = async () => {
   error.value = ''
 
   try {
-    const response = await fetch('/mail-api/v1/auth/google/create-account', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        google_id: googleId.value,
-        google_email: googleEmail.value,
-        google_name: googleName.value,
-        google_avatar: googleAvatar.value
-      })
+    const result = await authAPI.createGoogleAccount({
+      google_id: googleId.value,
+      google_email: googleEmail.value,
+      google_name: googleName.value,
+      google_avatar: googleAvatar.value
     })
-
-    const result = await response.json()
 
     if (result.code === 0 && result.data) {
       // 保存token
@@ -211,22 +204,14 @@ const bindExistingAccount = async () => {
   error.value = ''
 
   try {
-    const response = await fetch('/mail-api/v1/auth/google/bind-existing', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        email: bindForm.value.email,
-        password: bindForm.value.password,
-        google_id: googleId.value,
-        google_email: googleEmail.value,
-        google_name: googleName.value,
-        google_avatar: googleAvatar.value
-      })
+    const result = await authAPI.bindExistingGoogle({
+      email: bindForm.value.email,
+      password: bindForm.value.password,
+      google_id: googleId.value,
+      google_email: googleEmail.value,
+      google_name: googleName.value,
+      google_avatar: googleAvatar.value
     })
-
-    const result = await response.json()
 
     if (result.code === 0 && result.data) {
       // 保存token

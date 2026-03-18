@@ -247,11 +247,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import authAPI from '@/api/auth'
+import userAPI from '@/api/user'
 import PageHeader from '@/components/PageHeader/index.vue'
 import ConfirmDialog from '@/components/ConfirmDialog/index.vue'
+import { isTauri } from '@/services/api'
 
+const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 
 const loading = ref(true)
@@ -305,18 +311,12 @@ const formatDate = (dateString: string | undefined) => {
 const loadUserInfo = async () => {
   loading.value = true
   try {
-    const token = localStorage.getItem('token')
-    if (!token) {
+    if (!localStorage.getItem('token')) {
       return
     }
 
     // 获取用户信息
-    const userResponse = await fetch('/mail-api/v1/users/me', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-    const userData = await userResponse.json()
+    const userData = await userAPI.getProfile()
     if (userData.code === 0) {
       userInfo.value = userData.data
       // 检查是否有密码（password_hash 字段）
@@ -324,15 +324,7 @@ const loadUserInfo = async () => {
     }
 
     // 获取 Google 绑定状态
-    const googleResponse = await fetch('/mail-api/v1/auth/google/status', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-    
-    console.log('Google API 响应状态:', googleResponse.status)
-    
-    const googleData = await googleResponse.json()
+    const googleData = await authAPI.getGoogleBindStatus()
     
     console.log('Google 绑定状态原始数据:', googleData)
     console.log('is_bound 值:', googleData.data?.is_bound)
@@ -359,8 +351,10 @@ const loadUserInfo = async () => {
 const bindGoogle = async () => {
   bindLoading.value = true
   try {
-    const response = await fetch('/mail-api/v1/auth/google/login-url?is_bind=true')
-    const result = await response.json()
+    const result = await authAPI.getGoogleLoginUrl({
+      is_bind: true,
+      is_desktop: isTauri()
+    })
     
     if (result.code === 0) {
       // 跳转到 Google 授权页面
@@ -379,14 +373,7 @@ const bindGoogle = async () => {
 const handleUnbindConfirm = async () => {
   unbindLoading.value = true
   try {
-    const token = localStorage.getItem('token')
-    const response = await fetch('/mail-api/v1/auth/google/unbind', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
-    const result = await response.json()
+    const result = await authAPI.unbindGoogle()
     
     if (result.code === 0) {
       showMessage('解绑成功', 'success')
@@ -403,6 +390,27 @@ const handleUnbindConfirm = async () => {
   } finally {
     unbindLoading.value = false
   }
+}
+
+const handleGoogleBindRoute = async () => {
+  const bindSuccess = route.query.google_bind_success
+  const bindError = route.query.google_bind_error
+
+  if (!bindSuccess && !bindError) {
+    return
+  }
+
+  if (bindSuccess) {
+    showMessage('Google 绑定成功', 'success')
+    await loadUserInfo()
+  } else if (typeof bindError === 'string' && bindError) {
+    showMessage(bindError, 'error')
+  }
+
+  const nextQuery = { ...route.query }
+  delete nextQuery.google_bind_success
+  delete nextQuery.google_bind_error
+  await router.replace({ path: route.path, query: nextQuery })
 }
 
 // 处理充值
@@ -501,6 +509,7 @@ const cancelRecharge = () => {
 
 onMounted(() => {
   loadUserInfo()
+  handleGoogleBindRoute()
   
   // 如果URL有 #recharge 锚点，自动滚动到充值区域
   if (window.location.hash === '#recharge') {
@@ -516,5 +525,9 @@ onMounted(() => {
       }
     }, 500)
   }
+})
+
+watch(() => [route.query.google_bind_success, route.query.google_bind_error], () => {
+  handleGoogleBindRoute()
 })
 </script>
