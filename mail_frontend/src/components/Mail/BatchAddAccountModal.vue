@@ -241,14 +241,9 @@ const parseAccounts = () => {
   return accounts
 }
 
-// 缩短错误信息
+// 直接展示后端返回的原始错误信息
 const getShortMessage = (msg: string) => {
-  if (!msg) return ''
-  if (msg.includes('无法连接') || msg.includes('连接失败') || msg.includes('Connection')) return '连接失败'
-  if (msg.includes('授权') || msg.includes('auth') || msg.includes('password')) return '授权失败'
-  if (msg.includes('超时') || msg.includes('timeout')) return '超时'
-  if (msg.length > 10) return msg.substring(0, 10) + '...'
-  return msg
+  return msg || ''
 }
 
 const handleSubmit = () => {
