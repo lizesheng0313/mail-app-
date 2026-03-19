@@ -1005,6 +1005,7 @@ const autoRefresh = useAutoRefresh(async () => {
 
 // 第三方邮箱自动收取（10分钟）
 const externalAutoFetch = useAutoRefresh(async () => {
+  if (!isTauri()) return
   if (mailboxType.value !== 'external') return
   if (!userStore.isAuthenticated) return
   if (fetchingExternalEmails.value) return
@@ -1227,6 +1228,9 @@ const loadAllExternalEmails = async () => {
 
 // 收取所有外部邮箱的邮件
 const fetchAllExternalEmails = async () => {
+  // Web 端不支持“收取全部”
+  if (!isTauri()) return
+
   // 防止重复点击
   if (fetchingExternalEmails.value) {
     return
@@ -1237,99 +1241,93 @@ const fetchAllExternalEmails = async () => {
 
   try {
     const tauriInvoke = await getTauriInvoke()
-    if (tauriInvoke) {
-      // 桌面端：逐个邮箱本地收取
-      const res = await batchLoginAPI.getAccounts(1, 100)
-      const accountList = res.code === 0 ? (res.data?.accounts || []) : []
-      if (accountList.length === 0) {
-        showMessage('暂无外部邮箱', 'error')
-        fetchingExternalEmails.value = false
-        return
-      }
+    if (!tauriInvoke) {
+      showMessage('桌面端能力未就绪，请稍后重试', 'error')
+      return
+    }
 
-      let totalNew = 0
-      let failCount = 0
+    // 桌面端：逐个邮箱本地收取
+    const res = await batchLoginAPI.getAccounts(1, 100)
+    const accountList = res.code === 0 ? (res.data?.accounts || []) : []
+    if (accountList.length === 0) {
+      showMessage('暂无外部邮箱', 'error')
+      fetchingExternalEmails.value = false
+      return
+    }
 
-      const friendlyError = (msg: string) => {
-        if (!msg) return '收取失败'
-        if (msg.includes('Unsafe Login') || msg.includes('unsafe login')) return '登录被拒绝，请检查授权码或邮箱IMAP设置'
-        if (msg.includes('auth') || msg.includes('AUTH') || msg.includes('password') || msg.includes('授权')) return '授权码错误或已失效'
-        if (msg.includes('Connection') || msg.includes('connect') || msg.includes('timeout')) return '连接超时，请检查网络'
-        if (msg.includes('Unable to parse')) return '服务器响应异常，请稍后重试'
-        if (msg.length > 30) return msg.substring(0, 30) + '...'
-        return msg
-      }
-      const token = localStorage.getItem('token') || ''
-      const serverUrl = getServerUrl()
+    let totalNew = 0
+    let failCount = 0
 
-      for (const account of accountList) {
-        try {
-          if (account.auth_type === 'oauth2') {
-            console.log('[ExternalFetch] desktop oauth2 batch fetch start', {
-              mailboxId: account.id,
-              email: account.email,
-              provider: account.oauth_provider
-            })
-            const res = await batchLoginAPI.fetchOAuth2Emails(account.id)
-            console.log('[ExternalFetch] desktop oauth2 batch fetch result', {
-              mailboxId: account.id,
-              email: account.email,
-              code: res.code,
-              message: res.message,
-              count: res.data?.count
-            })
-            if (res.code !== 0) {
-              throw new Error(res.message || '收取失败')
-            }
+    const friendlyError = (msg: string) => {
+      if (!msg) return '收取失败'
+      if (msg.includes('Unsafe Login') || msg.includes('unsafe login')) return '登录被拒绝，请检查授权码或邮箱IMAP设置'
+      if (msg.includes('auth') || msg.includes('AUTH') || msg.includes('password') || msg.includes('授权')) return '授权码错误或已失效'
+      if (msg.includes('Connection') || msg.includes('connect') || msg.includes('timeout')) return '连接超时，请检查网络'
+      if (msg.includes('Unable to parse')) return '服务器响应异常，请稍后重试'
+      if (msg.length > 30) return msg.substring(0, 30) + '...'
+      return msg
+    }
+    const token = localStorage.getItem('token') || ''
+    const serverUrl = getServerUrl()
 
-            totalNew += res.data?.count || 0
-            await batchLoginAPI.updateMailboxStatus(account.id, 'active')
-            continue
-          }
-
-          const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
-          const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
-
-          const result = await tauriInvoke('fetch_emails', {
+    for (const account of accountList) {
+      try {
+        if (account.auth_type === 'oauth2') {
+          console.log('[ExternalFetch] desktop oauth2 batch fetch start', {
             mailboxId: account.id,
             email: account.email,
-            password: account.password,
-            protocol: account.protocol,
-            host: host || null,
-            port: port || null,
-            token,
-            serverUrl
+            provider: account.oauth_provider
           })
-          totalNew += result.count || 0
-          // 更新邮箱状态为正常
-          await batchLoginAPI.updateMailboxStatus(account.id, 'active')
-        } catch (e: any) {
-          console.error(`收取 ${account.email} 失败:`, e)
-          failCount++
-          // 更新邮箱状态为失败，左侧显示红点
-          const rawMsg = typeof e === 'string' ? e : (e?.message || '收取失败')
-          await batchLoginAPI.updateMailboxStatus(account.id, 'failed', friendlyError(rawMsg))
-        }
-      }
+          const res = await batchLoginAPI.fetchOAuth2Emails(account.id)
+          console.log('[ExternalFetch] desktop oauth2 batch fetch result', {
+            mailboxId: account.id,
+            email: account.email,
+            code: res.code,
+            message: res.message,
+            count: res.data?.count
+          })
+          if (res.code !== 0) {
+            throw new Error(res.message || '收取失败')
+          }
 
-      if (failCount === 0) {
-        if (totalNew > 0) {
-          showMessage(`收取成功，新增 ${totalNew} 封邮件`, 'success')
-        } else {
-          showMessage('收取完成，暂无新邮件', 'success')
+          totalNew += res.data?.count || 0
+          await batchLoginAPI.updateMailboxStatus(account.id, 'active')
+          continue
         }
+
+        const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
+        const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
+
+        const result = await tauriInvoke('fetch_emails', {
+          mailboxId: account.id,
+          email: account.email,
+          password: account.password,
+          protocol: account.protocol,
+          host: host || null,
+          port: port || null,
+          token,
+          serverUrl
+        })
+        totalNew += result.count || 0
+        // 更新邮箱状态为正常
+        await batchLoginAPI.updateMailboxStatus(account.id, 'active')
+      } catch (e: any) {
+        console.error(`收取 ${account.email} 失败:`, e)
+        failCount++
+        // 更新邮箱状态为失败，左侧显示红点
+        const rawMsg = typeof e === 'string' ? e : (e?.message || '收取失败')
+        await batchLoginAPI.updateMailboxStatus(account.id, 'failed', friendlyError(rawMsg))
+      }
+    }
+
+    if (failCount === 0) {
+      if (totalNew > 0) {
+        showMessage(`收取成功，新增 ${totalNew} 封邮件`, 'success')
       } else {
-        showMessage(`收取完成，新增 ${totalNew} 封，${failCount} 个邮箱失败`, 'warning')
+        showMessage('收取完成，暂无新邮件', 'success')
       }
     } else {
-      // Web 端：调用后端接口
-      const result = await batchLoginAPI.fetchAll()
-      if (result.code !== 0) {
-        showMessage(result.message || '收取失败', 'error')
-        fetchingExternalEmails.value = false
-        return
-      }
-      showMessage(result.message || '收取成功', 'success')
+      showMessage(`收取完成，新增 ${totalNew} 封，${failCount} 个邮箱失败`, 'warning')
     }
 
     // 收取成功后立即刷新邮件列表

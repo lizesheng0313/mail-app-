@@ -123,7 +123,7 @@
               @click.stop="handleDelete(account.id)"
             />
             <ActionButton
-              v-if="!isSendEmailView && (isDesktop || account.auth_type === 'oauth2')"
+              v-if="!isSendEmailView && account.auth_type === 'oauth2'"
               icon="refresh"
               variant="primary"
               :tooltip="fetchingIds.includes(account.id) ? '收取中...' : '收取邮件'"
@@ -159,19 +159,6 @@ import { unifiedAPI } from '@/api/unified'
 import { mailboxTagsAPI } from '@/api/mailboxTags'
 import { showMessage } from '@/utils/message'
 import { formatTimestamp } from '@/utils/timeUtils'
-import { isTauri, getServerUrl } from '@/services/api'
-const isDesktop = isTauri()
-
-// 获取 Tauri invoke（按需加载，避免竞态）
-async function getTauriInvoke() {
-  if (!isTauri()) return null
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    return invoke
-  } catch {
-    return null
-  }
-}
 
 const props = defineProps<{
   isSendEmailView?: boolean
@@ -382,54 +369,18 @@ const fetchSingleMailbox = async (accountId: number) => {
       return
     }
 
-    // OAuth2 邮箱统一走后端 OAuth2 拉取（Web/桌面一致）
-    if (account.auth_type === 'oauth2') {
-      const res = await batchLoginAPI.fetchOAuth2Emails(account.id)
-      if (res.code === 0) {
-        showMessage(res.message || '收取成功', 'success')
-      } else {
-        showMessage(res.message || '收取失败', 'error')
-      }
-      await loadAccounts()
-      emit('refresh')
+    if (account.auth_type !== 'oauth2') {
       return
     }
 
-    const tauriInvoke = await getTauriInvoke()
-    if (tauriInvoke) {
-      // 桌面端：本地收取
-      const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
-      const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
-
-      const token = localStorage.getItem('token') || ''
-      const serverUrl = getServerUrl()
-
-      const result = await tauriInvoke('fetch_emails', {
-        mailboxId: account.id,
-        email: account.email,
-        password: account.password,
-        protocol: account.protocol,
-        host: host || null,
-        port: port || null,
-        token,
-        serverUrl
-      })
-
-      showMessage(`收取成功，新增 ${result.count || 0} 封邮件`, 'success')
-      await loadAccounts()
-      emit('refresh')
+    const res = await batchLoginAPI.fetchOAuth2Emails(account.id)
+    if (res.code === 0) {
+      showMessage(res.message || '收取成功', 'success')
     } else {
-      // Web 端：调用后端接口
-      const res = await batchLoginAPI.fetchSingle(accountId)
-      if (res.code === 0) {
-        showMessage(res.message || '收取成功', 'success')
-        await loadAccounts()
-        emit('refresh')
-      } else {
-        showMessage(res.message || '收取失败', 'error')
-        await loadAccounts()
-      }
+      showMessage(res.message || '收取失败', 'error')
     }
+    await loadAccounts()
+    emit('refresh')
   } catch (e: any) {
     showMessage(typeof e === 'string' ? e : (e.message || '收取失败'), 'error')
     await loadAccounts()
