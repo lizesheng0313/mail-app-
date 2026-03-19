@@ -14,9 +14,17 @@
           class="w-4 h-4 mr-3 mt-1 cursor-pointer flex-shrink-0"
         />
         <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-black truncate" :class="{ 'font-bold': !email.is_read }">
-            {{ email.subject || '(无主题)' }}
-          </p>
+          <div class="flex items-center gap-2 min-w-0">
+            <p class="text-sm font-medium text-black truncate" :class="{ 'font-bold': !email.is_read }">
+              {{ email.subject || '(无主题)' }}
+            </p>
+            <span
+              v-if="isJunkEmail(email)"
+              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 border border-amber-200"
+            >
+              垃圾邮件
+            </span>
+          </div>
           <p class="text-xs text-gray-600 mt-1 truncate">发件人：{{ email.from_addr }}</p>
 
           <!-- 附件提示 -->
@@ -90,6 +98,20 @@ const handleClick = () => {
   } else {
     emit('click')
   }
+}
+
+const isJunkEmail = (email: any) => {
+  const folder = String(email?.folder || '').toLowerCase()
+  if (folder.includes('junk') || folder.includes('spam') || folder.includes('垃圾') || folder.includes('废件')) {
+    return true
+  }
+  const subject = String(email?.subject || '')
+  return (
+    subject.startsWith('[垃圾邮件]') ||
+    subject.startsWith('【垃圾邮件】') ||
+    subject.startsWith('[垃圾箱]') ||
+    subject.startsWith('【垃圾箱】')
+  )
 }
 
 const formatDate = (timestamp: number) => {

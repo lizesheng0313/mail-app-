@@ -123,7 +123,7 @@
               @click.stop="handleDelete(account.id)"
             />
             <ActionButton
-              v-if="!isSendEmailView && account.auth_type === 'oauth2'"
+              v-if="!isSendEmailView && isDesktop"
               icon="refresh"
               variant="primary"
               :tooltip="fetchingIds.includes(account.id) ? '收取中...' : '收取邮件'"
@@ -139,6 +139,7 @@
 
   <ConfirmDialog
     :visible="showConfirm"
+    :mask="false"
     :title="isDeleting.batch ? '批量删除' : '删除账号'"
     :message="isDeleting.batch ? `确定删除 ${isDeleting.ids.length} 个账号？` : '确定删除这个账号？'"
     :loading="deleting"
@@ -159,6 +160,7 @@ import { unifiedAPI } from '@/api/unified'
 import { mailboxTagsAPI } from '@/api/mailboxTags'
 import { showMessage } from '@/utils/message'
 import { formatTimestamp } from '@/utils/timeUtils'
+import { isTauri } from '@/services/api'
 
 const props = defineProps<{
   isSendEmailView?: boolean
@@ -166,6 +168,8 @@ const props = defineProps<{
   selectedSendIds?: number[]
   smtpAccounts?: any[]
 }>()
+
+const isDesktop = isTauri()
 
 // SMTP 状态查询
 const smtpEmailSet = computed(() => {
@@ -343,6 +347,7 @@ const confirmDelete = async () => {
     )
     showMessage(`已删除 ${isDeleting.value.ids.length} 个账号`)
     await loadAccounts()
+    emit('refresh')
   } catch (e: any) {
     showMessage(e.message || '删除失败', 'error')
   } finally {
@@ -369,11 +374,9 @@ const fetchSingleMailbox = async (accountId: number) => {
       return
     }
 
-    if (account.auth_type !== 'oauth2') {
-      return
-    }
-
-    const res = await batchLoginAPI.fetchOAuth2Emails(account.id)
+    const res = account.auth_type === 'oauth2'
+      ? await batchLoginAPI.fetchOAuth2Emails(account.id)
+      : await batchLoginAPI.fetchEmails(account.id)
     if (res.code === 0) {
       showMessage(res.message || '收取成功', 'success')
     } else {

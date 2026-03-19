@@ -23,9 +23,17 @@
         />
         
         <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-black truncate" :class="{ 'font-bold': !isRead }">
-            {{ subject || '(无主题)' }}
-          </p>
+          <div class="flex items-center gap-2 min-w-0">
+            <p class="text-sm font-medium text-black truncate" :class="{ 'font-bold': !isRead }">
+              {{ subject || '(无主题)' }}
+            </p>
+            <span
+              v-if="isJunkEmail"
+              class="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 border border-amber-200"
+            >
+              垃圾邮件
+            </span>
+          </div>
           <p class="text-sm text-gray-600 truncate mt-1">
             发件人：{{ email.from_addr }}
           </p>
@@ -44,19 +52,20 @@
 </template>
 
 <script setup lang="ts">
-import { formatTimestamp } from '@/utils/timeUtils'
+import { computed } from 'vue'
 
 interface Props {
   subject: string
   sender: string
   date: number
+  email?: any
   isRead?: boolean
   isSelected?: boolean
   isChecked?: boolean
   batchMode?: boolean
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   isRead: false,
   isSelected: false,
   isChecked: false,
@@ -89,4 +98,18 @@ const formatDate = (timestamp: number) => {
 const handleClick = () => {
   // 点击事件由父组件处理
 }
+
+const isJunkEmail = computed(() => {
+  const folder = String(props.email?.folder || '').toLowerCase()
+  if (folder.includes('junk') || folder.includes('spam') || folder.includes('垃圾') || folder.includes('废件')) {
+    return true
+  }
+  const subject = String(props.email?.subject || props.subject || '')
+  return (
+    subject.startsWith('[垃圾邮件]') ||
+    subject.startsWith('【垃圾邮件】') ||
+    subject.startsWith('[垃圾箱]') ||
+    subject.startsWith('【垃圾箱】')
+  )
+})
 </script>

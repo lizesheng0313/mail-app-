@@ -39,7 +39,7 @@
           <span>批量分享</span>
         </button>
 
-        <!-- 批量操作 -->
+        <!-- 批量删除 -->
         <button
           @click="handleDeleteClick"
           :disabled="loading || selectedCount === 0"
@@ -52,7 +52,7 @@
           <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
           </svg>
-          <span>{{ loading ? '删除中...' : '批量操作' }}</span>
+          <span>{{ loading ? '删除中...' : '批量删除' }}</span>
         </button>
 
         <!-- 关闭批量模式（圆形 X 按钮） -->
@@ -94,7 +94,7 @@ const handleCloseClick = () => {
 
 // 处理删除按钮点击
 const handleDeleteClick = () => {
-  console.log('🟣 MultiSelectToolbar - 批量操作按钮被点击')
+  console.log('🟣 MultiSelectToolbar - 批量删除按钮被点击')
   console.log('🟣 selectedCount:', props.selectedCount)
   console.log('🟣 type:', props.type)
   console.log('🟣 准备触发 delete-selected 事件')

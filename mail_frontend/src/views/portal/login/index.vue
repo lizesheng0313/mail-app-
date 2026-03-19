@@ -24,7 +24,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
         </div>
-        <h2 class="mt-6 text-3xl font-bold text-black">肥猫猫邮箱</h2>
+        <h2 class="mt-6 text-3xl font-bold text-black">肥猫猫邮箱服务</h2>
         <p class="mt-2 text-sm text-black">
           {{ isResetMode ? '重置密码' : (isLoginMode ? '登录您的账户' : '创建新账户') }}
         </p>

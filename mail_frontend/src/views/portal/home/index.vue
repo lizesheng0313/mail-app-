@@ -1,5 +1,5 @@
 <template>
-  <ThreeColumnLayout>
+  <ThreeColumnLayout :compact-panels="!userStore.isAuthenticated">
     <!-- 顶部工具栏 -->
     <template #toolbar>
       <div v-if="userStore.isAuthenticated" class="flex flex-col gap-3">
@@ -73,55 +73,36 @@
       </div>
       <section
         v-else
-        class="rounded-2xl border border-gray-100 bg-white px-6 py-6 shadow-sm"
+        class="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm"
       >
-        <div class="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:items-start">
-          <div>
-            <p class="text-xs font-semibold uppercase tracking-[0.24em] text-primary-600">
-              邮箱管理 · 第三方邮箱接入 · 邮件自动化
-            </p>
-            <h1 class="mt-3 text-3xl font-bold tracking-tight text-gray-900 sm:text-4xl">
-              肥猫猫：邮箱管理与邮件自动化平台
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div class="min-w-0">
+            <h1 class="text-lg font-semibold text-gray-900">
+              肥猫猫邮箱服务
             </h1>
-            <p class="mt-4 max-w-3xl text-base leading-7 text-gray-600">
-              提供邮箱管理、第三方邮箱接入、邮件验证码提取、批量收发、工作流市场和桌面端管理能力，
-              帮助个人与团队统一处理多邮箱、收件箱协作和邮件自动化任务。
+            <p class="mt-1 text-sm text-gray-600">
+              临时邮箱、第三方邮箱接入与邮件自动化平台
             </p>
-            <div class="mt-5 flex flex-wrap gap-3">
-              <a
-                href="/market"
-                class="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700"
-              >
-                浏览工作流市场
-              </a>
-              <a
-                href="/download"
-                class="inline-flex items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-400 hover:bg-gray-50"
-              >
-                下载桌面端
-              </a>
-              <a
-                href="/about"
-                class="inline-flex items-center rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-400 hover:bg-gray-50"
-              >
-                了解产品
-              </a>
-            </div>
           </div>
-
-          <div class="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-            <div class="rounded-xl bg-primary-50 px-4 py-3">
-              <div class="text-xs font-semibold uppercase tracking-wide text-primary-700">多邮箱管理</div>
-              <p class="mt-2 text-sm text-primary-900">统一查看和处理系统邮箱与业务邮箱，减少多端切换成本。</p>
-            </div>
-            <div class="rounded-xl bg-gray-50 px-4 py-3">
-              <div class="text-xs font-semibold uppercase tracking-wide text-gray-700">第三方邮箱支持</div>
-              <p class="mt-2 text-sm text-gray-700">支持接入常见第三方邮箱账号，集中收件、发件和状态管理。</p>
-            </div>
-            <div class="rounded-xl bg-gray-50 px-4 py-3">
-              <div class="text-xs font-semibold uppercase tracking-wide text-gray-700">自动化与工作流</div>
-              <p class="mt-2 text-sm text-gray-700">结合工作流市场与桌面端能力，把重复邮件任务变成可复用流程。</p>
-            </div>
+          <div class="flex flex-wrap gap-2">
+            <a
+              href="/market"
+              class="inline-flex items-center rounded-md bg-primary-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-primary-700"
+            >
+              工作流市场
+            </a>
+            <a
+              href="/download"
+              class="inline-flex items-center rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:border-gray-400 hover:bg-gray-50"
+            >
+              下载桌面端
+            </a>
+            <a
+              href="/about"
+              class="inline-flex items-center rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:border-gray-400 hover:bg-gray-50"
+            >
+              了解产品
+            </a>
           </div>
         </div>
       </section>
@@ -252,8 +233,8 @@
           
           <template #actions>
             <button
-              v-if="isTauri() && !selectedExternalMailboxId"
-              @click="fetchAllExternalEmails"
+              v-if="isTauri()"
+              @click="selectedExternalMailboxId ? fetchExternalMailboxEmails() : fetchAllExternalEmails()"
               :disabled="fetchingExternalEmails"
               class="px-3 py-1.5 text-xs bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
             >
@@ -266,7 +247,7 @@
               >
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              <span>{{ fetchingExternalEmails ? '收取中...' : '收取全部' }}</span>
+              <span>{{ fetchingExternalEmails ? '收取中...' : (selectedExternalMailboxId ? '收取当前' : '收取全部') }}</span>
             </button>
           </template>
           
@@ -309,6 +290,17 @@
         :selected-mailbox-ids="selectedExternalMailboxIds"
       />
     </template>
+
+    <template #footer v-if="!userStore.isAuthenticated">
+      <div class="flex flex-col gap-2 text-xs text-gray-500 sm:flex-row sm:items-center sm:justify-between">
+        <div>服务名称：肥猫猫邮箱服务</div>
+        <div class="flex items-center gap-3">
+          <a href="/privacy-policy" class="hover:text-primary-600">隐私权政策</a>
+          <span class="text-gray-300">|</span>
+          <a href="/terms-of-service" class="hover:text-primary-600">服务条款</a>
+        </div>
+      </div>
+    </template>
   </ThreeColumnLayout>
 
   <!-- Web端小程序二维码 -->
@@ -328,6 +320,7 @@
   <!-- 删除确认弹窗 -->
   <ConfirmDialog
     :visible="showDeleteConfirm"
+    :mask="false"
     :title="deletingBatch ? '批量删除' : '删除邮件'"
     :message="deletingBatch ? `确定删除 ${deletingIds.length} 封邮件？` : '确定删除这封邮件？'"
     :loading="deleting"
@@ -384,7 +377,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useMailboxStore } from '@/stores/auth'
 import { useMailStore } from '@/stores/mail'
@@ -497,6 +490,23 @@ const externalEmailPage = ref(1)
 const externalEmailPageSize = ref(20)
 const externalEmailTotal = ref(0)
 
+const MAILBOX_TYPE_STORAGE_KEY = 'portal_home_mailbox_type'
+const getSavedMailboxType = (): 'system' | 'external' | null => {
+  try {
+    const value = localStorage.getItem(MAILBOX_TYPE_STORAGE_KEY)
+    return value === 'system' || value === 'external' ? value : null
+  } catch {
+    return null
+  }
+}
+const saveMailboxType = (type: 'system' | 'external') => {
+  try {
+    localStorage.setItem(MAILBOX_TYPE_STORAGE_KEY, type)
+  } catch {
+    // ignore
+  }
+}
+
 // 保存每个Tab的选中邮件
 const systemSelectedEmail = ref<any>(null)
 const externalSelectedEmail = ref<any>(null)
@@ -526,6 +536,7 @@ const switchMailboxType = (type: 'system' | 'external') => {
   
   // 切换类型
   mailboxType.value = type
+  saveMailboxType(type)
   
   // 恢复目标Tab的选中邮件
   if (type === 'system') {
@@ -921,6 +932,13 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
     if (successCount > 0 && externalMailboxListRef.value?.loadAccounts) {
       await externalMailboxListRef.value.loadAccounts()
     }
+    if (successCount > 0 && mailboxType.value === 'external' && currentView.value === 'emails') {
+      if (selectedExternalMailboxId.value) {
+        await loadExternalMailboxEmails()
+      } else {
+        await loadAllExternalEmails()
+      }
+    }
     if (successCount > 0) {
       await loadSmtpAccounts()
     }
@@ -1023,9 +1041,33 @@ onMounted(async () => {
     // 同时加载所有邮件（不选择特定邮箱）
     await mailStore.fetchUserEmails()
     await loadSmtpAccounts()
+
+    // 恢复上次使用的 Tab（临时邮箱 / 第三方邮箱）
+    const savedMailboxType = getSavedMailboxType()
+    if (savedMailboxType) {
+      switchMailboxType(savedMailboxType)
+    } else {
+      saveMailboxType(mailboxType.value)
+    }
+  } else {
+    // 未登录也写默认值，避免首次进入没有偏好
+    saveMailboxType(mailboxType.value)
+    autoRefresh.start()
+    return
   }
-  // 启动自动刷新（所有用户）
-  autoRefresh.start()
+
+  // 按恢复后的 Tab 启动对应刷新器
+  if (mailboxType.value === 'external') {
+    autoRefresh.stop()
+    if (!externalAutoFetch.isRunning.value) {
+      externalAutoFetch.start()
+    }
+  } else {
+    externalAutoFetch.stop()
+    if (!autoRefresh.isRunning.value) {
+      autoRefresh.start()
+    }
+  }
 })
 
 // 申请免费邮箱
@@ -1105,6 +1147,16 @@ const loadExternalMailboxEmails = async () => {
       if (externalEmails.value.length === 0 && externalEmailPage.value === 1) {
         showMessage('暂无邮件，点击"收取邮件"按钮获取新邮件', 'success')
       }
+    } else {
+      const msg = response.message || '加载邮件失败'
+      externalEmails.value = []
+      externalEmailTotal.value = 0
+      if (msg.includes('邮箱不存在') || msg.includes('无权限')) {
+        selectedExternalMailboxId.value = null
+        selectedExternalEmailId.value = null
+        await loadAllExternalEmails()
+      }
+      showMessage(msg, 'error')
     }
   } catch (error) {
     console.error('❌ 获取外部邮箱邮件失败:', error)
@@ -1250,7 +1302,6 @@ const fetchAllExternalEmails = async () => {
     const res = await batchLoginAPI.getAccounts(1, 100)
     const accountList = res.code === 0 ? (res.data?.accounts || []) : []
     if (accountList.length === 0) {
-      showMessage('暂无外部邮箱', 'error')
       fetchingExternalEmails.value = false
       return
     }

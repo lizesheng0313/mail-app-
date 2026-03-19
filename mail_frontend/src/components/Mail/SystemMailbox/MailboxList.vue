@@ -93,6 +93,7 @@
 
   <ConfirmDialog
     :visible="showConfirm"
+    :mask="false"
     :title="isDeleting.batch ? '批量删除' : '删除邮箱'"
     :message="isDeleting.batch ? `确定删除 ${isDeleting.ids.length} 个邮箱？` : '确定删除这个邮箱？'"
     :loading="deleting"

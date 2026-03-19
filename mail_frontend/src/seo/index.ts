@@ -11,10 +11,10 @@ export interface PageSeo {
 }
 
 const SITE_URL = 'https://zjkdongao.cn'
-const SITE_NAME = '肥猫猫'
+const SITE_NAME = '肥猫猫邮箱服务'
 
 const DEFAULT_SEO: PageSeo = {
-  title: '肥猫猫 - 邮箱管理、第三方邮箱接入与邮件自动化平台',
+  title: '肥猫猫邮箱服务 - 邮箱管理、第三方邮箱接入与邮件自动化平台',
   description:
     '肥猫猫提供邮箱管理、第三方邮箱接入、邮件自动化、批量收发与工作流市场能力，帮助团队统一处理多邮箱和邮件任务。',
   keywords:
