@@ -55,7 +55,11 @@ onMounted(async () => {
         if (path === '/oauth2/callback') {
           window.dispatchEvent(new CustomEvent('oauth2-callback', { detail: query }))
           if (query.oauth2_success === '1') {
-            showMessage(`邮箱授权成功${query.email ? `: ${query.email}` : ''}`, 'success')
+            if (query.oauth2_warning) {
+              showMessage(`邮箱授权成功${query.email ? `: ${query.email}` : ''}，但首次收取失败`, 'warning')
+            } else {
+              showMessage(`邮箱授权成功${query.email ? `: ${query.email}` : ''}`, 'success')
+            }
           } else if (query.oauth2_error) {
             showMessage(query.oauth2_error, 'error')
           }

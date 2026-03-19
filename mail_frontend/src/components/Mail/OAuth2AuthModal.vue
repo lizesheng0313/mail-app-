@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="fixed inset-0 z-50 bg-black/50 backdrop-blur-[1px] p-4 sm:p-6">
+    <div v-if="visible" class="fixed inset-0 z-50 p-4 sm:p-6">
       <div class="mx-auto flex h-full w-full max-w-3xl items-center justify-center">
       <div class="w-full overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 max-h-[86vh] flex flex-col">
         <!-- 标题栏 -->
@@ -223,6 +223,7 @@ const getStatusText = (status: string) => {
 const errorMessage = ref('')
 let activePopupWindow: Window | null = null
 const normalizeEmail = (value: string) => (value || '').trim().toLowerCase()
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const closeActivePopupWindow = () => {
   if (!activePopupWindow) return
@@ -465,6 +466,10 @@ const startAuthorization = async () => {
       } else {
         account.status = 'error'
         errorMessage.value = '授权超时或未完成，请重试'
+      }
+
+      if (!stopRequested.value && i < accounts.value.length - 1) {
+        await sleep(1200)
       }
       
     } catch (e: any) {
