@@ -61,7 +61,7 @@
     </div>
 
     <!-- 邮件列表 -->
-    <div class="flex-1 overflow-y-auto scrollbar-stable space-y-2">
+    <div ref="listScrollRef" class="flex-1 overflow-y-auto scrollbar-stable space-y-2">
       <slot 
         name="content"
         :emails="emails"
@@ -141,6 +141,7 @@ const emit = defineEmits<{
 const searchText = ref('')
 const showSearch = ref(false)
 let searchTimer: any = null
+const listScrollRef = ref<HTMLElement | null>(null)
 
 const handleSearch = () => {
   clearTimeout(searchTimer)
@@ -182,8 +183,14 @@ const cancelBatchMode = () => {
   batchSelection.cancelBatchMode()
 }
 
+const scrollToTop = () => {
+  if (!listScrollRef.value) return
+  listScrollRef.value.scrollTop = 0
+}
+
 defineExpose({
   cancelBatchMode,
-  clearSearch
+  clearSearch,
+  scrollToTop
 })
 </script>

@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri_plugin_updater::UpdaterExt;
 
+const INITIAL_HISTORY_FETCH_LIMIT: usize = 2000;
+const INCREMENTAL_FETCH_LIMIT: usize = 200;
+const HISTORY_BACKFILL_THRESHOLD: usize = 100;
+
 /// 同步邮件请求（发送到远程服务器）
 #[derive(Debug, Serialize)]
 pub struct SyncEmailsRequest {
@@ -207,6 +211,78 @@ async fn try_smtp_verify(result: &mut LoginResult, email: &str, password: &str, 
     result.smtp_error = Some(format!("所有 SMTP 候选均失败，最后错误: {}", last_error));
 }
 
+/// 根据服务端已同步数量决定本次收取窗口：
+/// - 首次/数据很少：历史回补窗口（2000）
+/// - 否则：增量窗口（200）
+async fn resolve_fetch_limit(server_url: &str, token: &str, mailbox_id: i64) -> usize {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/unified-emails/external-emails",
+        server_url.trim_end_matches('/')
+    );
+    let mailbox_id_str = mailbox_id.to_string();
+
+    let response = match client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .query(&[
+            ("page", "1"),
+            ("page_size", "1"),
+            ("mailbox_id", mailbox_id_str.as_str()),
+        ])
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            info!("获取历史同步数量失败，使用增量窗口: {}", e);
+            return INCREMENTAL_FETCH_LIMIT;
+        }
+    };
+
+    if !response.status().is_success() {
+        info!(
+            "查询历史同步数量失败(status={})，使用增量窗口",
+            response.status()
+        );
+        return INCREMENTAL_FETCH_LIMIT;
+    }
+
+    let body: serde_json::Value = match response.json().await {
+        Ok(v) => v,
+        Err(e) => {
+            info!("解析历史同步数量响应失败，使用增量窗口: {}", e);
+            return INCREMENTAL_FETCH_LIMIT;
+        }
+    };
+
+    if body.get("code").and_then(|v| v.as_i64()) != Some(0) {
+        info!("历史同步数量接口返回失败，使用增量窗口: {}", body);
+        return INCREMENTAL_FETCH_LIMIT;
+    }
+
+    let total = body
+        .get("data")
+        .and_then(|v| v.get("pagination"))
+        .and_then(|v| v.get("total"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+
+    if total <= HISTORY_BACKFILL_THRESHOLD {
+        info!(
+            "启用历史回补窗口: mailbox_id={}, total={}, limit={}",
+            mailbox_id, total, INITIAL_HISTORY_FETCH_LIMIT
+        );
+        INITIAL_HISTORY_FETCH_LIMIT
+    } else {
+        info!(
+            "启用增量窗口: mailbox_id={}, total={}, limit={}",
+            mailbox_id, total, INCREMENTAL_FETCH_LIMIT
+        );
+        INCREMENTAL_FETCH_LIMIT
+    }
+}
+
 /// 收取邮件
 /// 前端调用：invoke('fetch_emails', { mailboxId, email, password, protocol, host?, port?, token, serverUrl })
 #[tauri::command]
@@ -238,9 +314,12 @@ pub async fn fetch_emails(
     info!("收到收取邮件请求: {} ({}) -> {}:{}", email, final_protocol, final_host, final_port);
     info!("密码长度: {}, token长度: {}, serverUrl: {}", password.len(), token.len(), server_url);
 
+    let fetch_limit = resolve_fetch_limit(&server_url, &token, mailbox_id).await;
+    info!("本次本地收取窗口: mailbox_id={}, limit={}", mailbox_id, fetch_limit);
+
     // 本地收取邮件
     let result = if final_protocol.to_lowercase() == "imap" {
-        match mail::imap::fetch_emails(&email, &password, &final_host, final_port, 50).await {
+        match mail::imap::fetch_emails(&email, &password, &final_host, final_port, fetch_limit).await {
             Ok(r) => r,
             Err(e) => {
                 error!("IMAP 收取失败: {}", e);
@@ -248,7 +327,7 @@ pub async fn fetch_emails(
             }
         }
     } else {
-        match mail::pop3::fetch_emails(&email, &password, &final_host, final_port, 50).await {
+        match mail::pop3::fetch_emails(&email, &password, &final_host, final_port, fetch_limit).await {
             Ok(r) => r,
             Err(e) => {
                 error!("POP3 收取失败: {}", e);

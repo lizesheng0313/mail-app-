@@ -1114,6 +1114,7 @@ const handleSelectExternalMailbox = async (account: any) => {
   currentView.value = 'emails'
   mailStore.selectedEmail = null
   await loadExternalMailboxEmails()
+  externalEmailListRef.value?.scrollToTop?.()
 }
 
 // 移除 SendEmailPanel 中的账号
@@ -1404,10 +1405,11 @@ const fetchAllExternalEmails = async () => {
 }
 
 // 返回全部外部邮件
-const backToAllExternalEmails = () => {
+const backToAllExternalEmails = async () => {
   selectedExternalMailboxId.value = null
   externalEmailPage.value = 1
-  loadAllExternalEmails()
+  await loadAllExternalEmails()
+  externalEmailListRef.value?.scrollToTop?.()
 }
 
 // 处理外部邮件刷新（单个邮箱收取成功后调用）
