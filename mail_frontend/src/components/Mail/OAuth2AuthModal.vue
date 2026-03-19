@@ -437,6 +437,63 @@ const waitForDesktopOAuthCallback = (expectedEmail: string, timeoutMs: number) =
     window.addEventListener('oauth2-callback', handler as EventListener)
   })
 
+const waitForWebOAuthCallback = (
+  expectedEmail: string,
+  timeoutMs: number,
+  popupWindow: Window | null
+) =>
+  new Promise<{ success: boolean, error?: string, popupClosed?: boolean } | null>((resolve) => {
+    const stopWatcher = window.setInterval(() => {
+      if (stopRequested.value) {
+        cleanup()
+        resolve({ success: false, error: '已取消授权' })
+        return
+      }
+
+      if (popupWindow && popupWindow.closed) {
+        cleanup()
+        resolve({ success: false, error: '检测到授权窗口已关闭', popupClosed: true })
+      }
+    }, 200)
+
+    const handler = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+
+      const detail = event.data || {}
+      if (detail.source !== 'oauth2-callback') return
+
+      if (detail.oauth2_success === '1') {
+        if (detail.email && detail.email !== expectedEmail) {
+          cleanup()
+          resolve({ success: false, error: `授权返回的邮箱与当前账号不一致: ${detail.email}` })
+          return
+        }
+
+        cleanup()
+        resolve({ success: true })
+        return
+      }
+
+      if (detail.oauth2_error) {
+        cleanup()
+        resolve({ success: false, error: detail.oauth2_error })
+      }
+    }
+
+    const cleanup = () => {
+      window.clearTimeout(timer)
+      window.clearInterval(stopWatcher)
+      window.removeEventListener('message', handler)
+    }
+
+    const timer = window.setTimeout(() => {
+      cleanup()
+      resolve(null)
+    }, timeoutMs)
+
+    window.addEventListener('message', handler)
+  })
+
 const startAuthorization = async () => {
   if (isAuthorizing.value) return
 
@@ -514,11 +571,21 @@ const startAuthorization = async () => {
           waitResult = stopRequested.value ? 'cancelled' : 'timeout'
         }
       } else {
-        waitResult = await waitForMailboxAuthorized(account.email, {
-          maxWait,
-          interval: 1000,
-          popupWindow: activePopupWindow
-        })
+        const callbackResult = await waitForWebOAuthCallback(account.email, maxWait, activePopupWindow)
+        if (callbackResult?.success === false) {
+          if (callbackResult.popupClosed) {
+            waitResult = 'popup_closed'
+          } else {
+            account.status = 'error'
+            errorMessage.value = callbackResult.error || '授权失败'
+            closeActivePopupWindow()
+            continue
+          }
+        } else if (callbackResult?.success) {
+          waitResult = await waitForMailboxAuthorized(account.email, { maxWait: 15000, interval: 1000 })
+        } else {
+          waitResult = stopRequested.value ? 'cancelled' : 'timeout'
+        }
       }
 
       closeActivePopupWindow()

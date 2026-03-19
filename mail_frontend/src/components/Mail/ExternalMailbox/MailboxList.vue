@@ -385,6 +385,31 @@ const fetchSingleMailbox = async (accountId: number) => {
         return
       }
 
+      if (account.auth_type === 'oauth2') {
+        console.log('[ExternalFetch] desktop oauth2 single fetch start', {
+          mailboxId: account.id,
+          email: account.email,
+          provider: account.oauth_provider
+        })
+        const res = await batchLoginAPI.fetchOAuth2Emails(account.id)
+        console.log('[ExternalFetch] desktop oauth2 single fetch result', {
+          mailboxId: account.id,
+          email: account.email,
+          code: res.code,
+          message: res.message,
+          count: res.data?.count
+        })
+        if (res.code === 0) {
+          showMessage(res.message || '收取成功', 'success')
+          await loadAccounts()
+          emit('refresh')
+        } else {
+          showMessage(res.message || '收取失败', 'error')
+          await loadAccounts()
+        }
+        return
+      }
+
       const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
       const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
 
