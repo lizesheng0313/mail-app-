@@ -389,12 +389,33 @@ fn read_multiline<R: Read>(stream: &mut R) -> Result<Vec<u8>, String> {
     Ok(content)
 }
 
+fn read_uidl_for_message<S: Read + Write>(stream: &mut S, msg_num: usize) -> Option<String> {
+    let command = format!("UIDL {}\r\n", msg_num);
+    if stream.write_all(command.as_bytes()).is_err() {
+        return None;
+    }
+
+    let response = read_line(stream).ok()?;
+    if !response.starts_with("+OK") {
+        return None;
+    }
+
+    response
+        .split_whitespace()
+        .last()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "+OK")
+        .map(|value| value.to_string())
+}
+
 // ── 邮件解析（未修改）─────────────────────────────────────────
 
 fn fetch_single_pop3<S: Read + Write>(
     stream: &mut S,
     msg_num: usize,
 ) -> Result<EmailData, String> {
+    let uidl = read_uidl_for_message(stream, msg_num);
+
     // 发送 RETR 命令
     stream
         .write_all(format!("RETR {}\r\n", msg_num).as_bytes())
@@ -439,11 +460,13 @@ fn fetch_single_pop3<S: Read + Write>(
         .iter()
         .find(|h| h.get_key_ref() == "Message-ID")
         .map(|h| h.get_value())
+        .or(uidl.map(|value| format!("pop3-uidl:{}", value)))
         .unwrap_or_else(|| format!("<pop3-{}@local>", msg_num));
 
     let (content_text, content_html, attachments) = extract_content(&parsed);
 
     let now = Utc::now().timestamp_millis();
+    let email_time_ms = parse_email_timestamp_ms(&parsed, now);
 
     Ok(EmailData {
         message_id,
@@ -452,8 +475,8 @@ fn fetch_single_pop3<S: Read + Write>(
         to_addr,
         content_text,
         content_html,
-        email_date_ms: now,
-        received_at_ms: now,
+        email_date_ms: email_time_ms,
+        received_at_ms: email_time_ms,
         attachments,
     })
 }
@@ -540,4 +563,238 @@ fn extract_content(mail: &mailparse::ParsedMail) -> (String, String, Vec<Attachm
     }
 
     (content_text, content_html, attachments)
+}
+
+fn parse_email_timestamp_ms(parsed: &mailparse::ParsedMail, fallback_ms: i64) -> i64 {
+    let raw_date = parsed
+        .headers
+        .iter()
+        .find(|h| h.get_key_ref().eq_ignore_ascii_case("Date"))
+        .map(|h| h.get_value())
+        .unwrap_or_default();
+
+    chrono::DateTime::parse_from_rfc2822(raw_date.trim())
+        .map(|dt| dt.timestamp_millis())
+        .or_else(|_| chrono::DateTime::parse_from_rfc3339(raw_date.trim()).map(|dt| dt.timestamp_millis()))
+        .unwrap_or(fallback_ms)
+}
+
+/// POP3 按 message_id 下载指定附件
+pub async fn download_attachment(
+    email: &str,
+    password: &str,
+    host: &str,
+    port: u16,
+    message_id: &str,
+    filename: &str,
+    save_path: &str,
+    fallback_subject: Option<&str>,
+    fallback_from_addr: Option<&str>,
+    fallback_to_addr: Option<&str>,
+    fallback_email_date_ms: Option<i64>,
+) -> Result<(), String> {
+    let email = email.to_string();
+    let password = password.to_string();
+    let host = host.to_string();
+    let message_id = message_id.to_string();
+    let filename = filename.to_string();
+    let save_path = save_path.to_string();
+    let fallback_subject = fallback_subject.map(|value| value.to_string());
+    let fallback_from_addr = fallback_from_addr.map(|value| value.to_string());
+    let fallback_to_addr = fallback_to_addr.map(|value| value.to_string());
+
+    tokio::task::spawn_blocking(move || {
+        let (mut tls, _) = connect_and_login(&host, port, &email, &password)?;
+
+        // 获取邮件数量
+        tls.write_all(b"STAT\r\n").map_err(|e| format!("发送失败: {}", e))?;
+        let response = read_line(&mut tls)?;
+        let parts: Vec<&str> = response.split_whitespace().collect();
+        let total: usize = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+        let expected_uidl = message_id.strip_prefix("pop3-uidl:").map(|value| value.to_string());
+
+        // 从最新往前遍历全部邮件，找到 message_id 匹配的邮件
+        for i in (1..=total).rev() {
+            if let Some(expected) = expected_uidl.as_ref() {
+                let current_uidl = read_uidl_for_message(&mut tls, i);
+                if current_uidl.as_deref() != Some(expected.as_str()) {
+                    continue;
+                }
+
+                let retr_cmd = format!("RETR {}\r\n", i);
+                tls.write_all(retr_cmd.as_bytes()).map_err(|e| format!("发送失败: {}", e))?;
+                let retr_first = read_line(&mut tls)?;
+                if !retr_first.starts_with("+OK") {
+                    return Err("获取邮件失败".to_string());
+                }
+                let raw = read_multiline(&mut tls)?;
+                let parsed = mailparse::parse_mail(&raw).map_err(|e| format!("解析邮件失败: {}", e))?;
+                let (_, _, attachments) = extract_content(&parsed);
+
+                let att = attachments
+                    .iter()
+                    .find(|a| a.filename == filename)
+                    .ok_or_else(|| format!("附件 {} 未找到", filename))?;
+
+                if att.data.is_empty() {
+                    return Err(format!("附件 {} 数据为空", filename));
+                }
+
+                std::fs::write(&save_path, &att.data).map_err(|e| format!("写入文件失败: {}", e))?;
+                let _ = tls.write_all(b"QUIT\r\n");
+                info!("✅ POP3 附件下载成功(UIDL): {} -> {}", filename, save_path);
+                return Ok(());
+            }
+
+            // 用 TOP 取头部
+            let top_cmd = format!("TOP {} 0\r\n", i);
+            tls.write_all(top_cmd.as_bytes()).map_err(|e| format!("发送失败: {}", e))?;
+            let first_line = read_line(&mut tls)?;
+            if !first_line.starts_with("+OK") {
+                continue;
+            }
+            let header_data = read_multiline(&mut tls)?;
+            let header_str = String::from_utf8_lossy(&header_data);
+            if !header_str.contains(&message_id) {
+                continue;
+            }
+
+            // 匹配到，用 RETR 取完整邮件
+            let retr_cmd = format!("RETR {}\r\n", i);
+            tls.write_all(retr_cmd.as_bytes()).map_err(|e| format!("发送失败: {}", e))?;
+            let retr_first = read_line(&mut tls)?;
+            if !retr_first.starts_with("+OK") {
+                return Err("获取邮件失败".to_string());
+            }
+            let raw = read_multiline(&mut tls)?;
+            let parsed = mailparse::parse_mail(&raw).map_err(|e| format!("解析邮件失败: {}", e))?;
+            let (_, _, attachments) = extract_content(&parsed);
+
+            let att = attachments
+                .iter()
+                .find(|a| a.filename == filename)
+                .ok_or_else(|| format!("附件 {} 未找到", filename))?;
+
+            if att.data.is_empty() {
+                return Err(format!("附件 {} 数据为空", filename));
+            }
+
+            std::fs::write(&save_path, &att.data).map_err(|e| format!("写入文件失败: {}", e))?;
+            let _ = tls.write_all(b"QUIT\r\n");
+            info!("✅ POP3 附件下载成功: {} -> {}", filename, save_path);
+            return Ok(());
+        }
+
+        // 老数据可能是本地伪造 message_id，这里退回按主题/发件人/时间匹配
+        if message_id.starts_with("<pop3-") {
+            info!("POP3 附件下载进入元数据兜底匹配: {}", message_id);
+            for i in (1..=total).rev() {
+                let retr_cmd = format!("RETR {}\r\n", i);
+                tls.write_all(retr_cmd.as_bytes()).map_err(|e| format!("发送失败: {}", e))?;
+                let retr_first = read_line(&mut tls)?;
+                if !retr_first.starts_with("+OK") {
+                    continue;
+                }
+                let raw = read_multiline(&mut tls)?;
+                let parsed = match mailparse::parse_mail(&raw) {
+                    Ok(parsed) => parsed,
+                    Err(_) => continue,
+                };
+
+                if !matches_fallback_email_metadata(
+                    &parsed,
+                    fallback_subject.as_deref(),
+                    fallback_from_addr.as_deref(),
+                    fallback_to_addr.as_deref(),
+                    fallback_email_date_ms,
+                ) {
+                    continue;
+                }
+
+                let (_, _, attachments) = extract_content(&parsed);
+                let att = attachments
+                    .iter()
+                    .find(|a| a.filename == filename)
+                    .ok_or_else(|| format!("附件 {} 未找到", filename))?;
+
+                if att.data.is_empty() {
+                    return Err(format!("附件 {} 数据为空", filename));
+                }
+
+                std::fs::write(&save_path, &att.data).map_err(|e| format!("写入文件失败: {}", e))?;
+                let _ = tls.write_all(b"QUIT\r\n");
+                info!("✅ POP3 附件下载成功(元数据兜底): {} -> {}", filename, save_path);
+                return Ok(());
+            }
+        }
+
+        let _ = tls.write_all(b"QUIT\r\n");
+        Err("邮件在服务器上未找到".to_string())
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))?
+}
+
+fn normalize_mail_header(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn matches_fallback_email_metadata(
+    parsed: &mailparse::ParsedMail,
+    fallback_subject: Option<&str>,
+    fallback_from_addr: Option<&str>,
+    fallback_to_addr: Option<&str>,
+    fallback_email_date_ms: Option<i64>,
+) -> bool {
+    let subject = parsed
+        .headers
+        .iter()
+        .find(|h| h.get_key_ref() == "Subject")
+        .map(|h| h.get_value())
+        .unwrap_or_default();
+    let from_addr = parsed
+        .headers
+        .iter()
+        .find(|h| h.get_key_ref() == "From")
+        .map(|h| h.get_value())
+        .unwrap_or_default();
+    let to_addr = parsed
+        .headers
+        .iter()
+        .find(|h| h.get_key_ref() == "To")
+        .map(|h| h.get_value())
+        .unwrap_or_default();
+
+    if let Some(expected_subject) = fallback_subject {
+        if normalize_mail_header(&subject) != normalize_mail_header(expected_subject) {
+            return false;
+        }
+    }
+
+    if let Some(expected_from_addr) = fallback_from_addr {
+        if normalize_mail_header(&from_addr) != normalize_mail_header(expected_from_addr) {
+            return false;
+        }
+    }
+
+    if let Some(expected_to_addr) = fallback_to_addr {
+        if normalize_mail_header(&to_addr) != normalize_mail_header(expected_to_addr) {
+            return false;
+        }
+    }
+
+    if let Some(expected_email_date_ms) = fallback_email_date_ms.filter(|value| *value > 0) {
+        let actual_email_date_ms = parse_email_timestamp_ms(parsed, expected_email_date_ms);
+        if (actual_email_date_ms - expected_email_date_ms).abs() > 24 * 60 * 60 * 1000 {
+            return false;
+        }
+    }
+
+    true
 }

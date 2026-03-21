@@ -44,8 +44,8 @@
               v-for="att in attachments"
               :key="att.id"
               class="attachment-item flex items-center gap-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg"
-              :class="isExternalEmail ? 'hover:bg-gray-100 cursor-pointer' : 'cursor-pointer'"
-              @click="isExternalEmail ? downloadAttachment(att) : showMessage('临时邮箱附件不支持下载', 'warning')"
+              :class="canDownloadExternalAttachment ? 'hover:bg-gray-100 cursor-pointer' : 'cursor-default'"
+              @click="handleAttachmentClick(att)"
             >
               <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -53,7 +53,7 @@
               <span class="text-sm text-gray-700 truncate max-w-[200px]">{{ att.filename }}</span>
               <span class="text-xs text-gray-400 flex-shrink-0">{{ formatFileSize(att.size_bytes) }}</span>
               <!-- 下载图标：仅外部邮箱 -->
-              <svg v-if="isExternalEmail" class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg v-if="canDownloadExternalAttachment" class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
             </div>
@@ -101,8 +101,8 @@
 import { ref, computed } from 'vue'
 import { formatTimestamp } from '@/utils/timeUtils'
 import { isTauri } from '@/services/api'
+import { batchLoginAPI } from '@/api/batchLogin'
 import { showMessage } from '@/utils/message'
-import api from '@/services/api'
 
 interface Email {
   id: number
@@ -145,6 +145,10 @@ const isExternalEmail = computed(() => {
   return props.email?.mailbox_type === 'external'
 })
 
+const canDownloadExternalAttachment = computed(() => {
+  return isExternalEmail.value && isTauri()
+})
+
 const formatFileSize = (bytes: number) => {
   if (!bytes) return '0 B'
   if (bytes < 1024) return bytes + ' B'
@@ -155,56 +159,93 @@ const formatFileSize = (bytes: number) => {
 const downloadAttachment = async (att: { id: number; filename: string }) => {
   if (!props.email) return
 
-  // 桌面端：优先尝试本地文件
-  if (isTauri() && props.email.message_id) {
+  // 桌面端：本地 IMAP/POP3 实时取附件
+  if (isTauri() && props.email.message_id && props.email.mailbox_type === 'external') {
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('open_local_attachment', {
-        messageId: props.email.message_id,
-        filename: att.filename
-      })
-      return
-    } catch {
-      // 本地没有，走 API 下载
-    }
-  }
-
-  // 通过 API 代理下载
-  try {
-    showMessage('正在下载附件...', 'info')
-    const response = await api.get(`/unified-emails/attachments/${att.id}/download`, {
-      responseType: 'blob'
-    })
-
-    const blob = new Blob([response as any])
-
-    if (isTauri()) {
-      // 桌面端：弹出保存对话框让用户选择位置
       const { save } = await import('@tauri-apps/plugin-dialog')
-      const { writeFile } = await import('@tauri-apps/plugin-fs')
+
+      // 弹保存对话框
       const savePath = await save({ defaultPath: att.filename })
-      if (savePath) {
-        const arrayBuffer = await blob.arrayBuffer()
-        await writeFile(savePath, new Uint8Array(arrayBuffer))
-        showMessage(`附件已保存至: ${savePath}`, 'success')
+      if (!savePath) return
+
+      showMessage('正在下载附件...', 'info')
+
+      // 获取邮箱连接信息
+      const mailboxId = props.email.mailbox_id
+      const accountsRes = await batchLoginAPI.getAccounts(1, 100)
+      const accountsData = accountsRes?.data
+      const accounts = Array.isArray(accountsData)
+        ? accountsData
+        : (accountsData?.accounts || accountsData?.mailboxes || [])
+      const mailbox = accounts.find((a: any) => a.id === mailboxId)
+
+      if (!mailbox) {
+        showMessage('找不到邮箱配置信息', 'error')
+        return
       }
-    } else {
-      // Web端：触发浏览器下载
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = att.filename
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
-      showMessage('下载完成，文件在浏览器下载文件夹', 'success')
+
+      const isOAuth2 = mailbox.auth_type === 'oauth2'
+      let accessToken = ''
+      let host = mailbox.imap_host || ''
+      let port = mailbox.imap_port || 993
+      let protocol = mailbox.protocol || 'imap'
+
+      if (isOAuth2) {
+        // OAuth2：获取 access_token + IMAP 配置
+        const tokenRes = await batchLoginAPI.getOAuth2AccessToken(mailboxId)
+        if (tokenRes.code !== 0) {
+          showMessage(tokenRes.message || '获取 token 失败', 'error')
+          return
+        }
+        accessToken = tokenRes.data.access_token
+        host = tokenRes.data.imap_host
+        port = tokenRes.data.imap_port
+        protocol = 'imap'
+      } else if (protocol === 'pop3') {
+        host = mailbox.pop3_host || ''
+        port = mailbox.pop3_port || 995
+      }
+
+      await invoke('download_attachment', {
+        email: mailbox.email,
+        password: mailbox.password || '',
+        protocol,
+        host,
+        port,
+        messageId: props.email.message_id,
+        filename: att.filename,
+        savePath,
+        authType: isOAuth2 ? 'oauth2' : 'password',
+        accessToken: isOAuth2 ? accessToken : undefined,
+        subject: props.email.subject || '',
+        fromAddr: props.email.from_addr || '',
+        toAddr: props.email.to_addr || '',
+        emailDateMs: Number(props.email.email_date || props.email.received_at || 0),
+      })
+
+      showMessage(`附件已保存至: ${savePath}`, 'success')
+      return
+    } catch (e: any) {
+      console.error('桌面端下载附件失败:', e)
+      showMessage(typeof e === 'string' ? e : (e?.message || '下载失败'), 'error')
+      return
     }
-  } catch (e: any) {
-    console.error('下载附件失败:', e)
-    const msg = e?.message || e?.response?.data?.detail || e?.response?.data?.message || String(e) || '下载失败'
-    showMessage(msg, 'error')
   }
+}
+
+const handleAttachmentClick = async (att: { id: number; filename: string }) => {
+  if (!isExternalEmail.value) {
+    showMessage('临时邮箱附件不支持下载', 'warning')
+    return
+  }
+
+  if (!isTauri()) {
+    showMessage('请在桌面端下载附件', 'warning')
+    return
+  }
+
+  await downloadAttachment(att)
 }
 
 const formatDate = (timestamp: number) => {

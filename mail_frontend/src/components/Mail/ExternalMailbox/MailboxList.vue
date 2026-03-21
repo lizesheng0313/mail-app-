@@ -374,7 +374,12 @@ const fetchSingleMailbox = async (accountId: number) => {
       return
     }
 
-    if (account.auth_type === 'oauth2' && isDesktop) {
+    if (!isDesktop) {
+      showMessage('仅支持桌面端本地收取', 'warning')
+      return
+    }
+
+    if (account.auth_type === 'oauth2') {
       // OAuth2 邮箱 + 桌面端：先获取 token，再走本地 IMAP XOAUTH2
       try {
         const tokenRes = await batchLoginAPI.getOAuth2AccessToken(account.id)
@@ -404,11 +409,26 @@ const fetchSingleMailbox = async (accountId: number) => {
         showMessage(typeof e === 'string' ? e : (e.message || '收取失败'), 'error')
       }
     } else {
-      const res = await batchLoginAPI.fetchEmails(account.id)
-      if (res.code === 0) {
-        showMessage(res.message || '收取成功', 'success')
-      } else {
-        showMessage(res.message || '收取失败', 'error')
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const token = localStorage.getItem('token') || ''
+        const serverUrl = getServerUrl()
+        const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
+        const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
+
+        await invoke('fetch_emails', {
+          mailboxId: account.id,
+          email: account.email,
+          password: account.password,
+          protocol: account.protocol,
+          host: host || null,
+          port: port || null,
+          token,
+          serverUrl
+        })
+        showMessage('收取成功', 'success')
+      } catch (e: any) {
+        showMessage(typeof e === 'string' ? e : (e.message || '收取失败'), 'error')
       }
     }
     await loadAccounts()

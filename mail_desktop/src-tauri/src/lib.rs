@@ -3,7 +3,7 @@ mod commands;
 mod mail;
 mod oauth_callback_server;
 
-use commands::{add_external_mailbox, check_for_update, download_and_install_update, fetch_emails, is_tauri, open_local_attachment, get_attachment_path, open_external_url, send_smtp_email};
+use commands::{add_external_mailbox, check_for_update, download_and_install_update, download_attachment, fetch_emails, get_attachment_path, is_tauri, open_external_url, open_local_attachment, send_smtp_email};
 use oauth_callback_server::start_oauth_callback_server;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -54,6 +54,7 @@ pub fn run() {
             download_and_install_update,
             open_local_attachment,
             get_attachment_path,
+            download_attachment,
             open_external_url,
             send_smtp_email,
         ])

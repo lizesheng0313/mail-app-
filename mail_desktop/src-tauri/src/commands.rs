@@ -1,4 +1,6 @@
 use crate::mail;
+use crate::mail::discovery::{dedupe_candidates, extract_root_domain, query_primary_mx, query_srv_records};
+use crate::mail::provider_constants::{find_hosted_provider_by_mx, find_known_provider};
 use crate::mail::types::{get_server_config, EmailData, FetchResult, LoginResult};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
@@ -133,82 +135,21 @@ async fn get_local_ip() -> Result<String, String> {
 /// 尝试验证 SMTP 登录，成功则更新 LoginResult 中的 smtp 字段
 /// 逐个尝试候选服务器，遇到真实可用的即停止
 async fn try_smtp_verify(result: &mut LoginResult, email: &str, password: &str, domain: &str) {
-    use lettre::{
-        transport::smtp::{authentication::Credentials, client::TlsParameters},
-        AsyncSmtpTransport, Tokio1Executor,
-    };
-
     info!("尝试 SMTP 验证: {}", email);
-
-    let candidates = match get_smtp_candidates(domain).await {
-        Ok(c) => c,
-        Err(e) => {
-            info!("SMTP 候选列表获取失败: {}", e);
-            result.smtp_verified = false;
-            result.smtp_error = Some(format!("无法获取 SMTP 候选列表: {}", e));
-            return;
+    match resolve_reachable_smtp_candidate(email, password, domain).await {
+        Ok((smtp_host, smtp_port)) => {
+            info!("SMTP 验证成功: {}:{}", smtp_host, smtp_port);
+            result.smtp_host = Some(smtp_host);
+            result.smtp_port = Some(smtp_port);
+            result.smtp_verified = true;
+            result.smtp_error = None;
         }
-    };
-
-    let mut last_error = String::from("无候选服务器");
-
-    for (smtp_host, smtp_port) in &candidates {
-        info!("尝试 SMTP: {}:{}", smtp_host, smtp_port);
-
-        let creds = Credentials::new(email.to_string(), password.to_string());
-
-        let connect_result = if *smtp_port == 465 {
-            let tls = match TlsParameters::new(smtp_host.clone()) {
-                Ok(t) => t,
-                Err(e) => {
-                    last_error = format!("TLS 参数错误: {}", e);
-                    continue;
-                }
-            };
-            AsyncSmtpTransport::<Tokio1Executor>::relay(smtp_host)
-                .map(|b| {
-                    b.port(*smtp_port)
-                        .tls(lettre::transport::smtp::client::Tls::Wrapper(tls))
-                        .credentials(creds)
-                        .build::<Tokio1Executor>()
-                })
-        } else {
-            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(smtp_host)
-                .map(|b| {
-                    b.port(*smtp_port)
-                        .credentials(creds)
-                        .build::<Tokio1Executor>()
-                })
-        };
-
-        match connect_result {
-            Ok(mailer) => match mailer.test_connection().await {
-                Ok(true) => {
-                    info!("SMTP 验证成功: {}:{}", smtp_host, smtp_port);
-                    result.smtp_host = Some(smtp_host.clone());
-                    result.smtp_port = Some(*smtp_port);
-                    result.smtp_verified = true;
-                    result.smtp_error = None;
-                    return;
-                }
-                Ok(false) => {
-                    last_error = format!("{}:{} 认证失败", smtp_host, smtp_port);
-                    info!("{}", last_error);
-                }
-                Err(e) => {
-                    last_error = format!("{}:{} 连接出错: {}", smtp_host, smtp_port, e);
-                    info!("{}", last_error);
-                }
-            },
-            Err(e) => {
-                last_error = format!("{}:{} 构建失败: {}", smtp_host, smtp_port, e);
-                info!("{}", last_error);
-            }
+        Err(error_message) => {
+            info!("SMTP 验证失败: {}", error_message);
+            result.smtp_verified = false;
+            result.smtp_error = Some(error_message);
         }
     }
-
-    result.smtp_verified = false;
-    result.smtp_error = Some(format!("所有 SMTP 候选均失败，最后错误: {}", last_error));
 }
 
 /// 根据服务端已同步数量决定本次收取窗口：
@@ -664,6 +605,59 @@ pub fn get_attachment_path(message_id: String, filename: String) -> Result<Strin
     Ok(file_path.to_string_lossy().to_string())
 }
 
+/// 通用附件下载（桌面端本地 IMAP/POP3 实时取附件写到用户选的路径）
+#[tauri::command]
+pub async fn download_attachment(
+    email: String,
+    password: String,
+    protocol: String,
+    host: String,
+    port: u16,
+    message_id: String,
+    filename: String,
+    save_path: String,
+    auth_type: Option<String>,
+    access_token: Option<String>,
+    subject: Option<String>,
+    from_addr: Option<String>,
+    to_addr: Option<String>,
+    email_date_ms: Option<i64>,
+) -> Result<(), String> {
+    info!("下载附件: email={}, protocol={}, message_id={}, filename={}", email, protocol, message_id, filename);
+
+    let is_oauth2 = auth_type.as_deref() == Some("oauth2");
+
+    let result = if is_oauth2 {
+        let token = access_token.ok_or("OAuth2 模式需要 access_token")?;
+        mail::imap::download_attachment_oauth2(&email, &token, &host, port, &message_id, &filename, &save_path).await
+    } else if protocol.to_lowercase() == "pop3" {
+        mail::pop3::download_attachment(
+            &email,
+            &password,
+            &host,
+            port,
+            &message_id,
+            &filename,
+            &save_path,
+            subject.as_deref(),
+            from_addr.as_deref(),
+            to_addr.as_deref(),
+            email_date_ms,
+        ).await
+    } else {
+        mail::imap::download_attachment(&email, &password, &host, port, &message_id, &filename, &save_path).await
+    };
+
+    if let Err(error_message) = &result {
+        error!(
+            "附件下载失败: email={}, protocol={}, host={}:{}, message_id={}, filename={}, error={}",
+            email, protocol, host, port, message_id, filename, error_message
+        );
+    }
+
+    result
+}
+
 /// 用系统默认浏览器打开外部链接（桌面端用）
 #[tauri::command]
 pub fn open_external_url(url: String) -> Result<(), String> {
@@ -684,7 +678,7 @@ pub fn open_external_url(url: String) -> Result<(), String> {
 }
 
 /// 通过本地 SMTP 发送邮件（桌面端专用，使用用户本机 IP）
-/// 前端调用：invoke('send_smtp_email', { fromEmail, password, smtpHost, smtpPort, toEmail, subject, content })
+/// 前端调用：invoke('send_smtp_email', { fromEmail, password, smtpHost, smtpPort, toEmail, subject, content, cc, bcc })
 #[tauri::command]
 pub async fn send_smtp_email(
     from_email: String,
@@ -694,10 +688,12 @@ pub async fn send_smtp_email(
     to_email: String,
     subject: String,
     content: String,
+    cc: Option<String>,
+    bcc: Option<String>,
     attachments: Option<Vec<SendEmailAttachment>>,
 ) -> Result<(), String> {
     use lettre::{
-        message::{header::ContentType, Attachment, MultiPart, SinglePart},
+        message::{header::ContentType, Attachment, Mailbox, MultiPart, SinglePart},
         transport::smtp::{authentication::Credentials, client::TlsParameters},
         AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
     };
@@ -706,10 +702,10 @@ pub async fn send_smtp_email(
 
     info!("📧 准备本地 SMTP 发送: {} -> {}. 传入配置: {}:{}", from_email, to_email, smtp_host, smtp_port);
 
-    // 如果 smtp_host 未知或为空，尝试自动探测
+    // 如果 smtp_host 未知或为空，尝试自动探测并逐个验证候选
     let (final_host, final_port) = if smtp_host.is_empty() {
         let domain = from_email.split('@').nth(1).unwrap_or("");
-        match auto_discover_smtp(domain).await {
+        match resolve_reachable_smtp_candidate(&from_email, &password, domain).await {
             Ok((h, p)) => {
                 info!("🔍 自动探测到 SMTP 服务器: {}:{}", h, p);
                 (h, p)
@@ -723,11 +719,39 @@ pub async fn send_smtp_email(
         (smtp_host.clone(), smtp_port)
     };
 
+    let parse_mailboxes = |input: &str, label: &str| -> Result<Vec<Mailbox>, String> {
+        input
+            .split(|c| matches!(c, ',' | ';' | '\n' | '，' | '；'))
+            .map(str::trim)
+            .filter(|addr| !addr.is_empty())
+            .map(|addr| {
+                addr.parse()
+                    .map_err(|e| format!("{}地址无效: {} ({})", label, addr, e))
+            })
+            .collect()
+    };
+
+    let to_mailboxes = parse_mailboxes(&to_email, "收件人")?;
+    if to_mailboxes.is_empty() {
+        return Err("收件人地址不能为空".to_string());
+    }
+    let cc_mailboxes = parse_mailboxes(cc.as_deref().unwrap_or(""), "抄送")?;
+    let bcc_mailboxes = parse_mailboxes(bcc.as_deref().unwrap_or(""), "密送")?;
+
     // 构建邮件
-    let message_builder = Message::builder()
+    let mut message_builder = Message::builder()
         .from(from_email.parse().map_err(|e| format!("发件人地址无效: {}", e))?)
-        .to(to_email.parse().map_err(|e| format!("收件人地址无效: {}", e))?)
         .subject(&subject);
+
+    for mailbox in to_mailboxes {
+        message_builder = message_builder.to(mailbox);
+    }
+    for mailbox in cc_mailboxes {
+        message_builder = message_builder.cc(mailbox);
+    }
+    for mailbox in bcc_mailboxes {
+        message_builder = message_builder.bcc(mailbox);
+    }
 
     let email = if let Some(attachments) = attachments.filter(|items| !items.is_empty()) {
         let mut multipart = MultiPart::mixed().singlepart(
@@ -793,190 +817,144 @@ pub async fn send_smtp_email(
     Ok(())
 }
 
-/// 从完整主机名提取根域名（最后两个标签），例如：
-///   qiye163mx01.mxmail.netease.com  →  netease.com
-///   mxbiz1.qq.com                   →  qq.com
-fn extract_root_domain(host: &str) -> String {
-    let parts: Vec<&str> = host.split('.').collect();
-    if parts.len() >= 2 {
-        parts[parts.len() - 2..].join(".")
-    } else {
-        host.to_string()
-    }
-}
-
-/// 根据域名查询 MX 记录，返回候选 SMTP 列表（不探测，由调用方逐一尝试）
-/// 已知消费者 / 企业邮箱的 SMTP 服务器（直接返回，无需 DNS）
-fn get_known_smtp(domain: &str) -> Option<Vec<(String, u16)>> {
-    let s = |h: &'static str, p: u16| Some(vec![(h.to_string(), p)]);
-    match domain {
-        // 腾讯系
-        "qq.com" | "foxmail.com"
-            => s("smtp.qq.com", 465),
-        // 网易系
-        "163.com" | "vip.163.com"
-            => s("smtp.163.com", 465),
-        "126.com" | "vip.126.com"
-            => s("smtp.126.com", 465),
-        "yeah.net"
-            => s("smtp.yeah.net", 465),
-        // 谷歌
-        "gmail.com" | "googlemail.com"
-            => s("smtp.gmail.com", 465),
-        // 微软系
-        "outlook.com" | "hotmail.com" | "live.com" | "live.cn" | "msn.com"
-            => Some(vec![("smtp.office365.com".to_string(), 587)]),
-        // 阿里云
-        "aliyun.com"
-            => s("smtp.aliyun.com", 465),
-        // 新浪
-        "sina.com" | "sina.cn" | "vip.sina.com"
-            => s("smtp.sina.com", 465),
-        // 搜狐
-        "sohu.com"
-            => s("smtp.sohu.com", 465),
-        // 中国电信 189
-        "189.cn"
-            => s("smtp.189.cn", 465),
-        // 中国移动 139
-        "139.com"
-            => s("smtp.139.com", 465),
-        // 中国联通 wo
-        "wo.cn"
-            => s("smtp.wo.cn", 465),
-        // 21cn
-        "21cn.com"
-            => s("smtp.21cn.com", 465),
-        // Tom
-        "tom.com"
-            => s("smtp.tom.com", 465),
-        // Apple
-        "icloud.com" | "me.com" | "mac.com"
-            => s("smtp.mail.me.com", 587),
-        // Zoho
-        "zoho.com" | "zohomail.com"
-            => s("smtp.zoho.com", 465),
-        // 雅虎
-        "yahoo.com" | "yahoo.cn" | "yahoo.com.cn" | "ymail.com"
-            => s("smtp.mail.yahoo.com", 465),
-        _ => None,
-    }
-}
-
-/// 根据 MX 主机识别企业邮件托管商，返回正确 SMTP 候选
-fn get_smtp_from_mx(mx_host: &str) -> Option<Vec<(String, u16)>> {
-    let mx = mx_host.to_lowercase();
-    if mx.contains("netease.com") || mx.contains("ym.163.com") || mx.contains("qiye.163.com") {
-        // 网易企业邮箱
-        Some(vec![
-            ("smtp.qiye.163.com".to_string(), 994),
-            ("smtp.qiye.163.com".to_string(), 465),
-        ])
-    } else if mx.contains("exmail.qq.com") || mx.contains("mxbiz.qq.com") {
-        // 腾讯企业邮箱
-        Some(vec![("smtp.exmail.qq.com".to_string(), 465)])
-    } else if mx.contains("qiye.aliyun.com") || mx.contains("mxn.qiye.aliyun") {
-        // 阿里云企业邮箱
-        Some(vec![("smtp.qiye.aliyun.com".to_string(), 465)])
-    } else {
-        None
-    }
-}
-
 async fn get_smtp_candidates(domain: &str) -> Result<Vec<(String, u16)>, String> {
     // 1. 已知消费者邮箱，直接返回（无需 DNS）
-    if let Some(known) = get_known_smtp(domain) {
+    if let Some(profile) = find_known_provider(domain) {
         log::info!("SMTP 快速路径命中: {}", domain);
-        return Ok(known);
+        return Ok(
+            profile
+                .smtp_candidates
+                .iter()
+                .map(|(host, port)| ((*host).to_string(), *port))
+                .collect(),
+        );
     }
 
-    let domain_owned = domain.to_string();
-
-    let primary_mx = tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let output = std::process::Command::new("nslookup")
-            .args(&["-type=mx", &domain_owned])
-            .output()
-            .map_err(|e| format!("执行 nslookup 失败: {}", e))?;
-
-        let out_str = String::from_utf8_lossy(&output.stdout);
-
-        let mut best_mx = String::new();
-        let mut best_pref = i32::MAX;
-
-        for line in out_str.lines() {
-            let line_lower = line.to_lowercase();
-            if line_lower.contains("mail exchanger") {
-                let parts: Vec<&str> = line.split("mail exchanger =").collect();
-                if parts.len() > 1 {
-                    let mut pref = 100;
-                    if let Some(pref_part) = parts[0].split("preference =").nth(1) {
-                        pref = pref_part.trim().trim_matches(',').parse::<i32>().unwrap_or(100);
-                    }
-                    let mx = parts[1].trim().trim_end_matches('.').to_string();
-                    if pref < best_pref && !mx.is_empty() {
-                        best_pref = pref;
-                        best_mx = mx;
-                    }
-                }
-            }
-        }
-
-        if best_mx.is_empty() {
-            let output2 = std::process::Command::new("dig")
-                .args(&["+short", "MX", &domain_owned])
-                .output()
-                .unwrap_or_else(|_| output.clone());
-            let out_str2 = String::from_utf8_lossy(&output2.stdout);
-
-            for line in out_str2.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let pref = parts[0].parse::<i32>().unwrap_or(100);
-                    let mx = parts[1].trim_end_matches('.').to_string();
-                    if pref < best_pref && !mx.is_empty() {
-                        best_pref = pref;
-                        best_mx = mx;
-                    }
-                }
-            }
-        }
-
-        if best_mx.is_empty() {
-            return Err("未找到 MX 记录".to_string());
-        }
-
-        Ok(best_mx)
-    }).await.map_err(|e| format!("任务执行失败: {}", e))??;
-
-    log::info!("发现首选 MX 记录: {}", primary_mx);
+    let primary_mx = query_primary_mx(domain);
+    if let Some(mx) = primary_mx.as_ref() {
+        log::info!("发现首选 MX 记录: {}", mx);
+    } else {
+        log::info!("未找到 {} 的 MX 记录，继续使用通用 SMTP 候选", domain);
+    }
 
     // 2. 根据 MX 识别企业邮件托管商
-    if let Some(known) = get_smtp_from_mx(&primary_mx) {
-        log::info!("SMTP MX 模式匹配命中: {}", primary_mx);
-        return Ok(known);
+    if let Some(provider) = primary_mx
+        .as_deref()
+        .and_then(find_hosted_provider_by_mx)
+    {
+        let profile = provider.profile;
+        log::info!(
+            "SMTP MX 模式匹配命中: {} -> {}",
+            primary_mx.unwrap_or_default(),
+            provider.name
+        );
+        return Ok(
+            profile
+                .smtp_candidates
+                .iter()
+                .map(|(host, port)| ((*host).to_string(), *port))
+                .collect(),
+        );
     }
 
-    let mx_root = extract_root_domain(&primary_mx);
-    let mut candidates: Vec<(String, u16)> = vec![
+    let mx_root = primary_mx
+        .as_deref()
+        .map(extract_root_domain)
+        .unwrap_or_else(|| domain.to_string());
+    let mut candidates: Vec<(String, u16)> = Vec::new();
+    candidates.extend(query_srv_records("submissions", domain));
+    candidates.extend(query_srv_records("submission", domain));
+    candidates.extend(vec![
         (format!("smtp.{}", domain), 465),
         (format!("smtp.{}", domain), 587),
         (format!("mail.{}", domain), 465),
         (format!("mail.{}", domain), 587),
-    ];
+        (format!("submission.{}", domain), 465),
+        (format!("submission.{}", domain), 587),
+        (format!("send.{}", domain), 465),
+        (format!("send.{}", domain), 587),
+    ]);
     if mx_root != domain {
         candidates.push((format!("smtp.{}", mx_root), 465));
         candidates.push((format!("smtp.{}", mx_root), 587));
         candidates.push((format!("mail.{}", mx_root), 465));
         candidates.push((format!("mail.{}", mx_root), 587));
+        candidates.push((format!("submission.{}", mx_root), 465));
+        candidates.push((format!("submission.{}", mx_root), 587));
     }
-    candidates.push((primary_mx.clone(), 465));
-    candidates.push((primary_mx.clone(), 587));
+    if let Some(mx) = primary_mx.as_ref() {
+        candidates.push((mx.clone(), 465));
+        candidates.push((mx.clone(), 587));
+    }
 
-    Ok(candidates)
+    Ok(dedupe_candidates(candidates))
 }
 
-/// 兼容 send_smtp_email fallback：返回候选列表第一个（发信时 smtp_host 已知，一般不走这里）
-async fn auto_discover_smtp(domain: &str) -> Result<(String, u16), String> {
+async fn resolve_reachable_smtp_candidate(
+    email: &str,
+    password: &str,
+    domain: &str,
+) -> Result<(String, u16), String> {
+    use lettre::{
+        transport::smtp::{authentication::Credentials, client::TlsParameters},
+        AsyncSmtpTransport, Tokio1Executor,
+    };
+
     let candidates = get_smtp_candidates(domain).await?;
-    candidates.into_iter().next().ok_or_else(|| "候选列表为空".to_string())
+    if candidates.is_empty() {
+        return Err("候选列表为空".to_string());
+    }
+
+    let mut last_error = String::from("无候选服务器");
+
+    for (smtp_host, smtp_port) in candidates {
+        info!("尝试 SMTP: {}:{}", smtp_host, smtp_port);
+
+        let creds = Credentials::new(email.to_string(), password.to_string());
+        let connect_result = if smtp_port == 465 {
+            let tls = match TlsParameters::new(smtp_host.clone()) {
+                Ok(tls) => tls,
+                Err(error) => {
+                    last_error = format!("TLS 参数错误: {}", error);
+                    continue;
+                }
+            };
+            AsyncSmtpTransport::<Tokio1Executor>::relay(&smtp_host)
+                .map(|builder| {
+                    builder
+                        .port(smtp_port)
+                        .tls(lettre::transport::smtp::client::Tls::Wrapper(tls))
+                        .credentials(creds)
+                        .build::<Tokio1Executor>()
+                })
+        } else {
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&smtp_host)
+                .map(|builder| {
+                    builder
+                        .port(smtp_port)
+                        .credentials(creds)
+                        .build::<Tokio1Executor>()
+                })
+        };
+
+        match connect_result {
+            Ok(mailer) => match mailer.test_connection().await {
+                Ok(true) => return Ok((smtp_host, smtp_port)),
+                Ok(false) => {
+                    last_error = format!("{}:{} 认证失败", smtp_host, smtp_port);
+                    info!("{}", last_error);
+                }
+                Err(error) => {
+                    last_error = format!("{}:{} 连接出错: {}", smtp_host, smtp_port, error);
+                    info!("{}", last_error);
+                }
+            },
+            Err(error) => {
+                last_error = format!("{}:{} 构建失败: {}", smtp_host, smtp_port, error);
+                info!("{}", last_error);
+            }
+        }
+    }
+
+    Err(format!("所有 SMTP 候选均失败，最后错误: {}", last_error))
 }

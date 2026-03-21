@@ -100,6 +100,9 @@ const handleClick = () => {
 }
 
 const isJunkEmail = computed(() => {
+  if (Boolean(props.email?.is_spam)) {
+    return true
+  }
   const folder = String(props.email?.folder || '').toLowerCase()
   if (folder.includes('junk') || folder.includes('spam') || folder.includes('垃圾') || folder.includes('废件')) {
     return true

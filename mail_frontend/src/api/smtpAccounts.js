@@ -23,15 +23,7 @@ export const smtpAccountsAPI = {
 
     // 删除 SMTP 发件账号
     deleteAccount: (accountId) =>
-        api.delete(`/smtp-accounts/${accountId}`),
-
-    // 发送邮件
-    sendEmail: (accountId, emailData) =>
-        api.post(`/smtp-accounts/${accountId}/send`, emailData),
-
-    // 批量发送邮件
-    batchSend: (data) =>
-        api.post('/smtp-accounts/batch-send', data)
+        api.delete(`/smtp-accounts/${accountId}`)
 }
 
 export default smtpAccountsAPI

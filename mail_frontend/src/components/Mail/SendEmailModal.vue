@@ -20,7 +20,7 @@
         >
           <option value="">请选择发件邮箱</option>
           <option 
-            v-for="mailbox in smtpVerifiedMailboxes" 
+            v-for="mailbox in availableMailboxes" 
             :key="mailbox.id" 
             :value="mailbox.id"
           >
@@ -28,15 +28,15 @@
           </option>
         </select>
         <!-- 没有可用邮箱的提示 -->
-        <p v-if="smtpVerifiedMailboxes.length === 0 && mailboxes.length > 0" class="mt-2 text-sm text-amber-600">
-          ⚠️ 没有可用于发送的邮箱。您的邮箱可能使用了不同的 SMTP 授权码。
+        <p v-if="availableMailboxes.length === 0 && mailboxes.length > 0" class="mt-2 text-sm text-amber-600">
+          ⚠️ 没有可用于发送的邮箱，请先配置可用的 SMTP 发件账号。
         </p>
         <!-- 显示不可用的邮箱 -->
-        <div v-if="unverifiedMailboxes.length > 0" class="mt-2">
-          <p class="text-xs text-gray-500 mb-1">以下邮箱 SMTP 未验证，无法发送：</p>
+        <div v-if="unavailableMailboxes.length > 0" class="mt-2">
+          <p class="text-xs text-gray-500 mb-1">以下邮箱未配置可用 SMTP 发件账号，无法发送：</p>
           <div class="flex flex-wrap gap-1">
             <span 
-              v-for="mailbox in unverifiedMailboxes" 
+              v-for="mailbox in unavailableMailboxes" 
               :key="mailbox.id"
               class="px-2 py-0.5 text-xs bg-gray-100 text-gray-500 rounded"
             >
@@ -136,8 +136,18 @@
 import { ref, watch, computed } from 'vue'
 import { isTauri } from '@/services/api'
 import BaseModal from '@/components/BaseModal/index.vue'
-import batchLoginAPI from '@/api/batchLogin'
+import smtpAccountsAPI from '@/api/smtpAccounts'
 import { showMessage } from '@/utils/message'
+
+async function getTauriInvoke() {
+  if (!isTauri()) return null
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke
+  } catch {
+    return null
+  }
+}
 
 const props = defineProps({
   visible: {
@@ -169,7 +179,6 @@ const props = defineProps({
 const emit = defineEmits(['update:visible', 'sent'])
 
 const isDesktop = computed(() => isTauri())
-const sendDisabled = computed(() => !isDesktop.value)
 
 // 本地 visible 值，用于 v-model
 const localVisible = computed({
@@ -177,14 +186,26 @@ const localVisible = computed({
   set: (val) => emit('update:visible', val)
 })
 
-// 已验证 SMTP 的邮箱列表（可用于发送）
-const smtpVerifiedMailboxes = computed(() => {
-  return props.mailboxes.filter((m) => m.smtp_verified === true)
+const smtpAccounts = ref([])
+
+const activeSmtpAccountMap = computed(() => {
+  return new Map(
+    smtpAccounts.value
+      .filter((account) => account.status === 'active')
+      .map((account) => [String(account.email || '').toLowerCase(), account])
+  )
 })
 
-// 未验证 SMTP 的邮箱列表
-const unverifiedMailboxes = computed(() => {
-  return props.mailboxes.filter((m) => m.smtp_verified !== true)
+const availableMailboxes = computed(() => {
+  return props.mailboxes.filter((mailbox) =>
+    activeSmtpAccountMap.value.has(String(mailbox.email || '').toLowerCase())
+  )
+})
+
+const unavailableMailboxes = computed(() => {
+  return props.mailboxes.filter((mailbox) =>
+    !activeSmtpAccountMap.value.has(String(mailbox.email || '').toLowerCase())
+  )
 })
 
 const sending = ref(false)
@@ -198,13 +219,35 @@ const form = ref({
   content: ''
 })
 
+const loadSmtpAccounts = async () => {
+  try {
+    const response = await smtpAccountsAPI.getAccounts()
+    if (response.code === 0) {
+      smtpAccounts.value = response.data?.accounts || []
+    } else {
+      smtpAccounts.value = []
+    }
+  } catch (error) {
+    console.error('获取 SMTP 账号列表失败:', error)
+    smtpAccounts.value = []
+  }
+}
+
+const getActiveSmtpAccount = (mailbox) => {
+  return activeSmtpAccountMap.value.get(String(mailbox?.email || '').toLowerCase()) || null
+}
+
 // 监听 visible 变化，初始化表单
-watch(() => props.visible, (newVal) => {
+watch(() => props.visible, async (newVal) => {
   if (newVal) {
-    // 打开时初始化（只使用已验证 SMTP 的邮箱）
-    const verifiedMailboxes = props.mailboxes.filter((m) => m.smtp_verified === true)
+    await loadSmtpAccounts()
+    const presetMailboxAvailable = props.presetMailboxId &&
+      availableMailboxes.value.some((mailbox) => mailbox.id === props.presetMailboxId)
+
     form.value = {
-      mailboxId: props.presetMailboxId || (verifiedMailboxes.length === 1 ? verifiedMailboxes[0].id : null),
+      mailboxId: presetMailboxAvailable
+        ? props.presetMailboxId
+        : (availableMailboxes.value.length === 1 ? availableMailboxes.value[0].id : null),
       to: props.replyTo || '',
       cc: '',
       bcc: '',
@@ -257,21 +300,63 @@ const handleSend = async () => {
   sending.value = true
 
   try {
-    const response = await batchLoginAPI.sendEmail(form.value.mailboxId, {
-      to: form.value.to,
+    const selectedMailbox = props.mailboxes.find((mailbox) => mailbox.id === form.value.mailboxId)
+    if (!selectedMailbox) {
+      showMessage('发件邮箱不存在', 'error')
+      return
+    }
+
+    const smtpAccount = getActiveSmtpAccount(selectedMailbox)
+    if (!smtpAccount) {
+      showMessage('该邮箱未配置可用 SMTP 发件账号', 'error')
+      return
+    }
+
+    const tauriInvoke = await getTauriInvoke()
+    if (!tauriInvoke) {
+      showMessage('第三方发件功能仅支持桌面端，请下载桌面客户端使用', 'warning')
+      return
+    }
+
+    await tauriInvoke('send_smtp_email', {
+      fromEmail: selectedMailbox.email,
+      password: smtpAccount.password || selectedMailbox.password || '',
+      smtpHost: smtpAccount.smtp_host || '',
+      smtpPort: smtpAccount.smtp_port || 465,
+      toEmail: form.value.to,
       subject: form.value.subject,
       content: form.value.content,
       cc: form.value.cc || null,
-      bcc: form.value.bcc || null
+      bcc: form.value.bcc || null,
+      attachments: []
     })
 
-    if (response.code === 0) {
-      showMessage('邮件发送成功', 'success')
-      emit('sent')
-      handleClose()
+    try {
+      const saveResponse = await smtpAccountsAPI.saveSentEmails({
+        records: [{
+          smtp_account_id: smtpAccount.id,
+          external_mailbox_id: selectedMailbox.id,
+          from_email: selectedMailbox.email,
+          to_email: form.value.to,
+          subject: form.value.subject,
+          content: form.value.content
+        }]
+      })
+      if (saveResponse.code !== 0) {
+        showMessage('邮件已发送，但发送记录同步失败', 'warning')
+      }
+    } catch (error) {
+      console.error('保存发送记录失败:', error)
+      showMessage('邮件已发送，但发送记录同步失败', 'warning')
     }
+
+    showMessage('邮件发送成功', 'success')
+    emit('sent')
+    handleClose()
   } catch (error) {
     console.error('发送失败:', error)
+    const message = error?.message || error?.toString?.() || '发送失败'
+    showMessage(message.startsWith('发送失败') ? message : `发送失败: ${message}`, 'error')
   } finally {
     sending.value = false
   }

@@ -342,8 +342,8 @@
   <ConfirmDialog
     :visible="showDownloadDialog"
     :mask="false"
-    title="需要桌面端"
-    message="普通邮箱（163/QQ等）需要桌面端验证登录，是否下载桌面客户端？"
+    :title="downloadDialogTitle"
+    :message="downloadDialogMessage"
     confirm-text="下载桌面端"
     cancel-text="取消"
     @confirm="openDownloadDesktop"
@@ -430,6 +430,8 @@ const showBatchAddModal = ref(false)
 const batchAddModalRef = ref<any>(null)
 const pendingOAuthAccounts = ref<Array<{ email: string, provider: string }>>([])
 const showDownloadDialog = ref(false)
+const downloadDialogTitle = ref('需要桌面端')
+const downloadDialogMessage = ref('第三方邮箱仅支持桌面端添加和收取，是否下载桌面客户端？')
 const showDeleteConfirm = ref(false)
 const deleting = ref(false)
 const deletingIds = ref<number[]>([])
@@ -456,6 +458,15 @@ const openDownloadDesktop = () => {
   }
 
   globalThis.location.href = 'https://zjkdongao.cn/download'
+}
+
+const openDesktopDownloadDialog = (
+  message = '第三方邮箱仅支持桌面端添加和收取，是否下载桌面客户端？',
+  title = '需要桌面端'
+) => {
+  downloadDialogTitle.value = title
+  downloadDialogMessage.value = message
+  showDownloadDialog.value = true
 }
 
 // 分享相关状态
@@ -614,6 +625,10 @@ const switchMailboxType = (type: 'system' | 'external') => {
 
 // 批量登录 - 打开添加账号弹窗
 const handleBatchLogin = () => {
+  if (!isTauri()) {
+    openDesktopDownloadDialog('第三方邮箱仅支持桌面端添加和收取，是否下载桌面客户端？')
+    return
+  }
   showBatchAddModal.value = true
 }
 
@@ -747,6 +762,27 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
       error?.message ||
       String(error || '')
 
+    const fetchNewMailboxOnce = async (tauriInvoke: any, mailboxId: number, accountData: any) => {
+      const host = accountData.protocol === 'imap' ? accountData.imap_host : accountData.pop3_host
+      const port = accountData.protocol === 'imap' ? accountData.imap_port : accountData.pop3_port
+      const token = localStorage.getItem('token') || ''
+      const serverUrl = getServerUrl()
+
+      const fetchResult = await tauriInvoke('fetch_emails', {
+        mailboxId,
+        email: accountData.email,
+        password: accountData.password,
+        protocol: accountData.protocol,
+        host: host || null,
+        port: port || null,
+        token,
+        serverUrl
+      })
+
+      await batchLoginAPI.updateMailboxStatus(mailboxId, 'active')
+      return Number(fetchResult?.count || 0)
+    }
+
     const markNoNeedOAuth = (email: string) => {
       successCount++
       if (batchAddModalRef.value) {
@@ -879,6 +915,7 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
             const response = await batchLoginAPI.addAccount({ ...accountData, skip_verify: true })
             if (response.code === 0) {
               successCount++
+              const mailboxId = Number(response.data?.mailbox_id || 0)
 
               let canSend = false
               if (result.smtp_verified) {
@@ -902,8 +939,25 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
               }
 
               const smtpStatus = canSend ? '能收能发' : '能收不能发'
+              let fetchStatus = ''
+
+              if (mailboxId > 0) {
+                try {
+                  const newCount = await fetchNewMailboxOnce(tauriInvoke, mailboxId, accountData)
+                  fetchStatus = `，首次收取完成（新增 ${newCount} 封）`
+                } catch (fetchError: any) {
+                  const fetchErrorMessage = resolveErrorMessage(fetchError)
+                  try {
+                    await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', fetchErrorMessage)
+                  } catch (statusError) {
+                    console.error('更新邮箱收取状态失败:', statusError)
+                  }
+                  fetchStatus = `，首次收取失败`
+                }
+              }
+
               if (batchAddModalRef.value) {
-                batchAddModalRef.value.updateResult(account.email, 'success', `本地验证成功（${smtpStatus}）`)
+                batchAddModalRef.value.updateResult(account.email, 'success', `本地验证成功（${smtpStatus}）${fetchStatus}`)
               }
             } else {
               const responseMessage = response.message || ''
@@ -1015,7 +1069,7 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
     
     // 如果有普通邮箱需要桌面端，提示下载
     if (needDesktopDownload) {
-      showDownloadDialog.value = true
+      openDesktopDownloadDialog('普通邮箱需要桌面端添加和收取，是否下载桌面客户端？')
     }
 
     // 刷新列表
@@ -1286,127 +1340,112 @@ const fetchExternalMailboxEmails = async () => {
 
   fetchingExternalEmails.value = true
   try {
-    // 桌面端：非 OAuth2 走本地 Tauri 收取，OAuth2 走后端
-    if (isTauri()) {
-      const mailboxId = selectedExternalMailboxId.value
+    if (!isTauri()) {
+      showMessage('仅支持桌面端本地收取', 'warning')
+      return
+    }
 
-      if (selectedExternalAuthType.value === 'oauth2') {
-        // OAuth2 邮箱：先获取 token，再走本地 IMAP XOAUTH2
-        const tauriInvoke = await getTauriInvoke()
-        if (!tauriInvoke) {
-          showMessage('桌面端能力未就绪，请稍后重试', 'error')
-          return
-        }
+    // 桌面端：统一走本地 Tauri 收取；OAuth2 只向后端拿 token
+    const mailboxId = selectedExternalMailboxId.value
 
-        const tokenRes = await batchLoginAPI.getOAuth2AccessToken(mailboxId)
-        if (tokenRes.code !== 0) {
-          const rawMsg = tokenRes.message || '获取 token 失败'
-          await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', rawMsg)
-          showMessage('收取失败: ' + rawMsg, 'error')
-          if (externalMailboxListRef.value?.loadAccounts) {
-            externalMailboxListRef.value.loadAccounts()
-          }
-          return
-        }
-
-        const { access_token: oauthAccessToken, imap_host, imap_port, email: oauthEmail } = tokenRes.data
-        const token = localStorage.getItem('token') || ''
-        const serverUrl = getServerUrl()
-
-        try {
-          await tauriInvoke('fetch_emails', {
-            mailboxId,
-            email: oauthEmail,
-            password: '',
-            protocol: 'imap',
-            host: imap_host,
-            port: imap_port,
-            token,
-            serverUrl,
-            authType: 'oauth2',
-            accessToken: oauthAccessToken,
-          })
-          await batchLoginAPI.updateMailboxStatus(mailboxId, 'active')
-        } catch (e: any) {
-          const rawMsg = typeof e === 'string' ? e : (e?.message || '收取失败')
-          await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', rawMsg)
-          showMessage('收取失败: ' + rawMsg, 'error')
-          if (externalMailboxListRef.value?.loadAccounts) {
-            externalMailboxListRef.value.loadAccounts()
-          }
-          return
-        }
-      } else {
-        // 非 OAuth2 邮箱：走本地 Tauri
-        const tauriInvoke = await getTauriInvoke()
-        if (!tauriInvoke) {
-          showMessage('桌面端能力未就绪，请稍后重试', 'error')
-          return
-        }
-
-        // 获取选中邮箱的详细信息
-        const res = await batchLoginAPI.getAccounts(1, 100)
-        const accountList = res.code === 0 ? (res.data?.accounts || []) : []
-        const account = accountList.find((a: any) => a.id === mailboxId)
-        if (!account) {
-          showMessage('未找到该邮箱信息', 'error')
-          return
-        }
-
-        const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
-        const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
-        const token = localStorage.getItem('token') || ''
-        const serverUrl = getServerUrl()
-
-        try {
-          await tauriInvoke('fetch_emails', {
-            mailboxId: account.id,
-            email: account.email,
-            password: account.password,
-            protocol: account.protocol,
-            host: host || null,
-            port: port || null,
-            token,
-            serverUrl
-          })
-          await batchLoginAPI.updateMailboxStatus(mailboxId, 'active')
-        } catch (e: any) {
-          const rawMsg = typeof e === 'string' ? e : (e?.message || '收取失败')
-          await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', rawMsg)
-          showMessage('收取失败: ' + rawMsg, 'error')
-          if (externalMailboxListRef.value?.loadAccounts) {
-            externalMailboxListRef.value.loadAccounts()
-          }
-          return
-        }
+    if (selectedExternalAuthType.value === 'oauth2') {
+      // OAuth2 邮箱：先获取 token，再走本地 IMAP XOAUTH2
+      const tauriInvoke = await getTauriInvoke()
+      if (!tauriInvoke) {
+        showMessage('桌面端能力未就绪，请稍后重试', 'error')
+        return
       }
 
-      // 收取成功，刷新列表
-      await new Promise(resolve => setTimeout(resolve, 500))
-      externalEmailPage.value = 1
-      await loadExternalMailboxEmails()
-      showMessage(`收取成功，共 ${externalEmails.value.length} 封邮件`, 'success')
-      if (externalMailboxListRef.value?.loadAccounts) {
-        externalMailboxListRef.value.loadAccounts()
+      const tokenRes = await batchLoginAPI.getOAuth2AccessToken(mailboxId)
+      if (tokenRes.code !== 0) {
+        const rawMsg = tokenRes.message || '获取 token 失败'
+        await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', rawMsg)
+        showMessage('收取失败: ' + rawMsg, 'error')
+        if (externalMailboxListRef.value?.loadAccounts) {
+          externalMailboxListRef.value.loadAccounts()
+        }
+        return
+      }
+
+      const { access_token: oauthAccessToken, imap_host, imap_port, email: oauthEmail } = tokenRes.data
+      const token = localStorage.getItem('token') || ''
+      const serverUrl = getServerUrl()
+
+      try {
+        await tauriInvoke('fetch_emails', {
+          mailboxId,
+          email: oauthEmail,
+          password: '',
+          protocol: 'imap',
+          host: imap_host,
+          port: imap_port,
+          token,
+          serverUrl,
+          authType: 'oauth2',
+          accessToken: oauthAccessToken,
+        })
+        await batchLoginAPI.updateMailboxStatus(mailboxId, 'active')
+      } catch (e: any) {
+        const rawMsg = typeof e === 'string' ? e : (e?.message || '收取失败')
+        await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', rawMsg)
+        showMessage('收取失败: ' + rawMsg, 'error')
+        if (externalMailboxListRef.value?.loadAccounts) {
+          externalMailboxListRef.value.loadAccounts()
+        }
+        return
       }
     } else {
-      // Web 端：只支持密码邮箱走后端
-      const fetchResult = await batchLoginAPI.fetchEmails(selectedExternalMailboxId.value)
-
-      if (fetchResult.code === 0) {
-        await new Promise(resolve => setTimeout(resolve, 500))
-        externalEmailPage.value = 1
-        await loadExternalMailboxEmails()
-        showMessage(`收取成功，共 ${externalEmails.value.length} 封邮件`, 'success')
-        if (externalMailboxListRef.value?.loadAccounts) {
-          externalMailboxListRef.value.loadAccounts()
-        }
-      } else {
-        showMessage('收取失败: ' + (fetchResult.message || fetchResult.data?.error || '未知错误'), 'error')
-        if (externalMailboxListRef.value?.loadAccounts) {
-          externalMailboxListRef.value.loadAccounts()
-        }
+      // 非 OAuth2 邮箱：走本地 Tauri
+      const tauriInvoke = await getTauriInvoke()
+      if (!tauriInvoke) {
+        showMessage('桌面端能力未就绪，请稍后重试', 'error')
+        return
       }
+
+      // 获取选中邮箱的详细信息
+      const res = await batchLoginAPI.getAccounts(1, 100)
+      const accountList = res.code === 0 ? (res.data?.accounts || []) : []
+      const account = accountList.find((a: any) => a.id === mailboxId)
+      if (!account) {
+        showMessage('未找到该邮箱信息', 'error')
+        return
+      }
+
+      const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
+      const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
+      const token = localStorage.getItem('token') || ''
+      const serverUrl = getServerUrl()
+
+      try {
+        await tauriInvoke('fetch_emails', {
+          mailboxId: account.id,
+          email: account.email,
+          password: account.password,
+          protocol: account.protocol,
+          host: host || null,
+          port: port || null,
+          token,
+          serverUrl
+        })
+        await batchLoginAPI.updateMailboxStatus(mailboxId, 'active')
+      } catch (e: any) {
+        const rawMsg = typeof e === 'string' ? e : (e?.message || '收取失败')
+        await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', rawMsg)
+        showMessage('收取失败: ' + rawMsg, 'error')
+        if (externalMailboxListRef.value?.loadAccounts) {
+          externalMailboxListRef.value.loadAccounts()
+        }
+        return
+      }
+    }
+
+    // 收取成功，刷新列表
+    await new Promise(resolve => setTimeout(resolve, 500))
+    externalEmailPage.value = 1
+    await loadExternalMailboxEmails()
+    showMessage(`收取成功，共 ${externalEmails.value.length} 封邮件`, 'success')
+    if (externalMailboxListRef.value?.loadAccounts) {
+      externalMailboxListRef.value.loadAccounts()
     }
   } catch (error: any) {
     console.error('❌ 收取邮件失败:', error)

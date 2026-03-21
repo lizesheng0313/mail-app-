@@ -1,8 +1,9 @@
 use crate::mail::types::{AttachmentData, EmailData, FetchResult, LoginResult};
 use chrono::Utc;
-use imap::Authenticator;
+use imap::{types::NameAttribute, Authenticator};
 use log::{error, info, warn};
 use native_tls::TlsStream;
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::time::Duration;
@@ -463,6 +464,197 @@ fn imap_fetch_oauth2_sync(
     })
 }
 
+/// IMAP 按 message_id 下载指定附件（密码认证）
+pub async fn download_attachment(
+    email: &str,
+    password: &str,
+    host: &str,
+    port: u16,
+    message_id: &str,
+    filename: &str,
+    save_path: &str,
+) -> Result<(), String> {
+    let email = email.to_string();
+    let password = password.to_string();
+    let host = host.to_string();
+    let message_id = message_id.to_string();
+    let filename = filename.to_string();
+    let save_path = save_path.to_string();
+
+    tokio::task::spawn_blocking(move || {
+        let (mut session, _) = connect_and_login(&host, port, &email, &password)?;
+        imap_download_attachment_sync(&mut session, &message_id, &filename, &save_path)
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))?
+}
+
+/// IMAP 按 message_id 下载指定附件（OAuth2 认证）
+pub async fn download_attachment_oauth2(
+    email: &str,
+    access_token: &str,
+    host: &str,
+    port: u16,
+    message_id: &str,
+    filename: &str,
+    save_path: &str,
+) -> Result<(), String> {
+    let email = email.to_string();
+    let access_token = access_token.to_string();
+    let host = host.to_string();
+    let message_id = message_id.to_string();
+    let filename = filename.to_string();
+    let save_path = save_path.to_string();
+
+    tokio::task::spawn_blocking(move || {
+        let (mut session, _) = connect_and_xoauth2(&host, port, &email, &access_token)?;
+        imap_download_attachment_sync(&mut session, &message_id, &filename, &save_path)
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))?
+}
+
+fn imap_download_attachment_sync<T: Read + Write>(
+    session: &mut imap::Session<T>,
+    message_id: &str,
+    filename: &str,
+    save_path: &str,
+) -> Result<(), String> {
+    let selectable_mailboxes = list_selectable_mailboxes(session);
+    info!(
+        "开始按 Message-ID 查找附件邮件，候选文件夹数: {}, message_id={}",
+        selectable_mailboxes.len(),
+        message_id
+    );
+
+    let mut found_mailbox = None;
+    let mut found_uid = None;
+    for mailbox in selectable_mailboxes {
+        match session.select(&mailbox) {
+            Ok(_) => {}
+            Err(e) => {
+                warn!("选择文件夹失败: {} ({})", mailbox, e);
+                continue;
+            }
+        }
+
+        match find_message_uid_in_selected_mailbox(session, message_id) {
+            Ok(Some(uid)) => {
+                found_mailbox = Some(mailbox);
+                found_uid = Some(uid);
+                break;
+            }
+            Ok(None) => continue,
+            Err(e) => {
+                warn!("在文件夹中搜索邮件失败: {} ({})", mailbox, e);
+                continue;
+            }
+        }
+    }
+
+    let mailbox_name = found_mailbox.ok_or_else(|| "邮件在服务器上未找到".to_string())?;
+    let uid = found_uid.ok_or_else(|| "邮件在服务器上未找到".to_string())?;
+    info!("附件所属邮件已定位: mailbox={}, uid={}", mailbox_name, uid);
+
+    // 取完整邮件
+    let uid_set = format!("{}", uid);
+    let messages = session
+        .uid_fetch(&uid_set, "RFC822")
+        .map_err(|e| format!("获取邮件失败: {}", e))?;
+    let message = messages.iter().next().ok_or("没有获取到邮件数据")?;
+    let body = message.body().ok_or("邮件内容为空")?;
+
+    let parsed = mailparse::parse_mail(body)
+        .map_err(|e| format!("解析邮件失败: {}", e))?;
+
+    let (_, _, attachments) = extract_content(&parsed);
+
+    let att = attachments
+        .iter()
+        .find(|a| a.filename == filename)
+        .ok_or_else(|| format!("附件 {} 未找到", filename))?;
+
+    if att.data.is_empty() {
+        return Err(format!("附件 {} 数据为空", filename));
+    }
+
+    std::fs::write(save_path, &att.data)
+        .map_err(|e| format!("写入文件失败: {}", e))?;
+
+    let _ = session.logout();
+    info!("✅ 附件下载成功: {} -> {}", filename, save_path);
+    Ok(())
+}
+
+fn list_selectable_mailboxes<T: Read + Write>(session: &mut imap::Session<T>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut mailboxes = Vec::new();
+
+    let push_mailbox = |items: &mut Vec<String>, seen: &mut HashSet<String>, name: &str| {
+        let normalized = name.trim().to_ascii_lowercase();
+        if normalized.is_empty() || !seen.insert(normalized) {
+            return;
+        }
+        items.push(name.to_string());
+    };
+
+    push_mailbox(&mut mailboxes, &mut seen, "INBOX");
+
+    match session.list(None, Some("*")) {
+        Ok(list) => {
+            for mailbox in list.iter() {
+                if mailbox
+                    .attributes()
+                    .iter()
+                    .any(|attr| matches!(attr, NameAttribute::NoSelect))
+                {
+                    continue;
+                }
+                push_mailbox(&mut mailboxes, &mut seen, mailbox.name());
+            }
+        }
+        Err(e) => warn!("获取 IMAP 文件夹列表失败，退回默认 INBOX: {}", e),
+    }
+
+    mailboxes
+}
+
+fn find_message_uid_in_selected_mailbox<T: Read + Write>(
+    session: &mut imap::Session<T>,
+    message_id: &str,
+) -> Result<Option<u32>, String> {
+    let search_query = format!("HEADER Message-ID \"{}\"", message_id);
+    let uids = session
+        .uid_search(&search_query)
+        .map_err(|e| format!("搜索邮件失败: {}", e))?;
+
+    if let Some(&uid) = uids.iter().next() {
+        return Ok(Some(uid));
+    }
+
+    info!("Message-ID 精确搜索无结果，遍历当前文件夹全部邮件头部匹配");
+    let all_uids = session
+        .uid_search("ALL")
+        .map_err(|e| format!("搜索邮件失败: {}", e))?;
+    let uids_vec: Vec<u32> = all_uids.into_iter().collect();
+
+    for &uid in uids_vec.iter().rev() {
+        let uid_set = uid.to_string();
+        if let Ok(messages) = session.uid_fetch(&uid_set, "BODY[HEADER.FIELDS (MESSAGE-ID)]") {
+            if let Some(message) = messages.iter().next() {
+                if let Some(body) = message.body() {
+                    let header = String::from_utf8_lossy(body);
+                    if header.contains(message_id) {
+                        return Ok(Some(uid));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(None)
+}
+
 fn imap_fetch_sync(
     email: &str,
     password: &str,
@@ -524,6 +716,20 @@ fn imap_fetch_sync(
 
 // ── 邮件解析（未修改）─────────────────────────────────────────
 
+fn parse_email_timestamp_ms(parsed: &mailparse::ParsedMail, fallback_ms: i64) -> i64 {
+    let raw_date = parsed
+        .headers
+        .iter()
+        .find(|h| h.get_key_ref().eq_ignore_ascii_case("Date"))
+        .map(|h| h.get_value())
+        .unwrap_or_default();
+
+    chrono::DateTime::parse_from_rfc2822(raw_date.trim())
+        .map(|dt| dt.timestamp_millis())
+        .or_else(|_| chrono::DateTime::parse_from_rfc3339(raw_date.trim()).map(|dt| dt.timestamp_millis()))
+        .unwrap_or(fallback_ms)
+}
+
 fn fetch_single_email<T: Read + Write>(
     session: &mut imap::Session<T>,
     uid: u32,
@@ -575,6 +781,7 @@ fn fetch_single_email<T: Read + Write>(
     let (content_text, content_html, attachments) = extract_content(&parsed);
 
     let now = Utc::now().timestamp_millis();
+    let email_time_ms = parse_email_timestamp_ms(&parsed, now);
 
     Ok(EmailData {
         message_id,
@@ -583,8 +790,8 @@ fn fetch_single_email<T: Read + Write>(
         to_addr,
         content_text,
         content_html,
-        email_date_ms: now,
-        received_at_ms: now,
+        email_date_ms: email_time_ms,
+        received_at_ms: email_time_ms,
         attachments,
     })
 }

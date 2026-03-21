@@ -36,6 +36,8 @@ export interface Email {
   email_date: string
   received_at: string
   is_read: boolean
+  is_spam?: boolean
+  folder?: string
   mailbox?: Mailbox
 }
 
