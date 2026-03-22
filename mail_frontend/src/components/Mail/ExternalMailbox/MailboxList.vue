@@ -1,5 +1,4 @@
 <template>
-
   <MailboxList
     ref="mailboxListRef"
     title="第三方邮箱"
@@ -10,6 +9,7 @@
     @select="$emit('select', $event)"
     @batch-delete="handleBatchDelete"
     @batch-share="handleBatchShare"
+    @batch-mode-start="$emit('batch-mode-start')"
   >
     <template #pagination>
       <Pagination
@@ -19,12 +19,17 @@
         @page-change="loadAccounts"
       />
     </template>
-    <template #content="{ mailboxes, selectedId, batchMode, selectedIds, toggleSelection, onSelect }">
+    <template
+      #content="{ mailboxes, selectedId, batchMode, selectedIds, toggleSelection, onSelect }"
+    >
       <div
         v-for="account in mailboxes"
         :key="account.id"
         class="group rounded-lg border border-transparent p-3"
-        :class="[getSendItemClass(account, selectedId, batchMode, selectedIds), isSendEmailView && !hasSmtp(account.email) ? 'cursor-not-allowed' : 'cursor-pointer']"
+        :class="[
+          getSendItemClass(account, selectedId, batchMode, selectedIds),
+          isSendEmailView && !hasSmtp(account.email) ? 'cursor-not-allowed' : 'cursor-pointer'
+        ]"
         @click="handleItemClick(account, batchMode, toggleSelection, onSelect)"
       >
         <div class="flex items-center justify-between">
@@ -33,11 +38,14 @@
               v-if="batchMode"
               type="checkbox"
               :checked="selectedIds.includes(account.id)"
-              @change.stop="toggleSelection(account.id)"
+              @click.stop="toggleSelection(account.id)"
               class="w-4 h-4 mr-3 cursor-pointer flex-shrink-0"
             />
             <!-- 发件模式下的选中图标 -->
-            <div v-else-if="isSendEmailView" class="w-5 h-5 mr-2 flex-shrink-0 flex items-center justify-center">
+            <div
+              v-else-if="isSendEmailView"
+              class="w-5 h-5 mr-2 flex-shrink-0 flex items-center justify-center"
+            >
               <svg
                 v-if="(selectedSendIds || []).includes(account.id)"
                 class="w-5 h-5 text-primary-600"
@@ -45,7 +53,12 @@
                 stroke="currentColor"
                 viewBox="0 0 24 24"
               >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
               <div
                 v-else
@@ -55,25 +68,30 @@
             </div>
             <div class="flex-1">
               <div class="flex items-center gap-2">
-                <span 
+                <span
                   v-if="account.status === 'active'"
                   class="w-2 h-2 rounded-full flex-shrink-0 bg-green-500"
                   title="🟢 在线"
                 ></span>
-                <span 
+                <span
                   v-else-if="account.status === 'failed'"
                   class="w-2 h-2 rounded-full flex-shrink-0 bg-red-500"
-                  :title="'🔴 连接失败' + (account.error_message ? ': ' + account.error_message : '')"
+                  :title="
+                    '🔴 连接失败' + (account.error_message ? ': ' + account.error_message : '')
+                  "
                 ></span>
-                <span 
+                <span
                   v-else
                   class="w-2 h-2 rounded-full flex-shrink-0 bg-gray-400"
                   title="⚪ 已禁用"
                 ></span>
-                <code class="text-sm truncate" :class="[
-                  account.status === 'failed' ? 'text-red-600' : 'text-black',
-                  isSendEmailView && !hasSmtp(account.email) ? 'opacity-50' : ''
-                ]">
+                <code
+                  class="text-sm truncate"
+                  :class="[
+                    account.status === 'failed' ? 'text-red-600' : 'text-black',
+                    isSendEmailView && !hasSmtp(account.email) ? 'opacity-50' : ''
+                  ]"
+                >
                   {{ account.email }}
                 </code>
               </div>
@@ -86,7 +104,11 @@
                   {{ account.error_message }}
                 </span>
                 <span v-else>
-                  更新：{{ (account.last_sync_at || account.created_at) ? formatDate(account.last_sync_at || account.created_at) : '未收取' }}
+                  更新：{{
+                    account.last_sync_at || account.created_at
+                      ? formatDate(account.last_sync_at || account.created_at)
+                      : '未收取'
+                  }}
                 </span>
               </p>
               <!-- 站点和标签 -->
@@ -102,7 +124,10 @@
               />
             </div>
           </div>
-          <div v-if="!batchMode" class="ml-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1 flex-shrink-0">
+          <div
+            v-if="!batchMode"
+            class="ml-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-1 flex-shrink-0"
+          >
             <ActionButton
               icon="copy"
               variant="copy"
@@ -126,9 +151,9 @@
               v-if="!isSendEmailView && isDesktop"
               icon="refresh"
               variant="primary"
-              :tooltip="fetchingIds.includes(account.id) ? '收取中...' : '收取邮件'"
-              :disabled="fetchingIds.includes(account.id)"
-              :class="{ 'animate-spin': fetchingIds.includes(account.id) }"
+              :tooltip="mergedFetchingIds.includes(account.id) ? '收取中...' : '收取邮件'"
+              :disabled="mergedFetchingIds.includes(account.id)"
+              :class="{ 'animate-spin': mergedFetchingIds.includes(account.id) }"
               @click.stop="fetchSingleMailbox(account.id)"
             />
           </div>
@@ -141,7 +166,9 @@
     :visible="showConfirm"
     :mask="false"
     :title="isDeleting.batch ? '批量删除' : '删除账号'"
-    :message="isDeleting.batch ? `确定删除 ${isDeleting.ids.length} 个账号？` : '确定删除这个账号？'"
+    :message="
+      isDeleting.batch ? `确定删除 ${isDeleting.ids.length} 个账号？` : '确定删除这个账号？'
+    "
     :loading="deleting"
     @confirm="confirmDelete"
     @cancel="showConfirm = false"
@@ -149,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import MailboxList from '@/components/Mail/MailboxList/MailboxList.vue'
 import Pagination from '@/components/Pagination/index.vue'
 import ActionButton from '@/components/ActionButton/index.vue'
@@ -159,14 +186,18 @@ import { batchLoginAPI } from '@/api/batchLogin'
 import { unifiedAPI } from '@/api/unified'
 import { mailboxTagsAPI } from '@/api/mailboxTags'
 import { showMessage } from '@/utils/message'
+import { normalizeOAuthRecoveryErrorMessage } from '@/utils/oauthRecovery'
 import { formatTimestamp } from '@/utils/timeUtils'
 import { isTauri, getServerUrl } from '@/services/api'
+import { runDesktopOAuthMailboxAction } from '@/services/desktopOAuthMailbox'
+import { canDesktopSmtpSend, normalizeSmtpEmail } from '@/utils/smtpCapability'
 
 const props = defineProps<{
   isSendEmailView?: boolean
   activeMailboxId?: number | null
   selectedSendIds?: number[]
   smtpAccounts?: any[]
+  fetchingIds?: number[]
 }>()
 
 const isDesktop = isTauri()
@@ -176,13 +207,13 @@ const smtpEmailSet = computed(() => {
   const set = new Set<string>()
   if (props.smtpAccounts) {
     for (const a of props.smtpAccounts) {
-      if (a.status === 'active') set.add(a.email)
+      if (canDesktopSmtpSend(a)) set.add(normalizeSmtpEmail(a.email))
     }
   }
   return set
 })
 
-const hasSmtp = (email: string) => smtpEmailSet.value.has(email)
+const hasSmtp = (email: string) => smtpEmailSet.value.has(normalizeSmtpEmail(email))
 
 const getSendItemClass = (account: any, selectedId: any, batchMode: boolean, selectedIds: any) => {
   if (props.isSendEmailView) {
@@ -196,7 +227,12 @@ const getSendItemClass = (account: any, selectedId: any, batchMode: boolean, sel
   return 'bg-gray-50 hover:bg-primary-100'
 }
 
-const handleItemClick = (account: any, batchMode: boolean, toggleSelection: Function, onSelect: Function) => {
+const handleItemClick = (
+  account: any,
+  batchMode: boolean,
+  toggleSelection: Function,
+  onSelect: Function
+) => {
   if (batchMode) {
     toggleSelection(account.id)
     return
@@ -210,9 +246,11 @@ const handleItemClick = (account: any, batchMode: boolean, toggleSelection: Func
 }
 
 const emit = defineEmits<{
-  'select': [id: number]
-  'refresh': []
-  'share': [mailboxes: any[]]
+  select: [id: number]
+  refresh: []
+  share: [mailboxes: any[]]
+  'oauth-reauthorize': [account: any]
+  'batch-mode-start': []
 }>()
 
 const accounts = ref([])
@@ -222,7 +260,11 @@ const isDeleting = ref({ batch: false, ids: [] as number[] })
 const selectedId = ref<number | null>(null)
 const fetchingIds = ref<number[]>([])
 const mailboxListRef = ref()
-const tagsData = ref<Record<number, { sites: any[], tags: any[] }>>({})
+const tagsData = ref<Record<number, { sites: any[]; tags: any[] }>>({})
+const mergedFetchingIds = computed(() => {
+  const ids = [...(props.fetchingIds || []), ...fetchingIds.value]
+  return Array.from(new Set(ids))
+})
 
 // 分页数据
 const currentPage = ref(1)
@@ -251,15 +293,19 @@ const formatDate = (date: string | number) => {
   return formatTimestamp(timestamp, 'datetime')
 }
 
+const handleRecoveredMailbox = () => {
+  void loadAccounts(currentPage.value || 1)
+}
+
 const loadAccounts = async (page = 1) => {
   try {
     const res = await batchLoginAPI.getAccounts(page, 20)
-    
+
     if (res.code === 0) {
       // 确保是数组：如果 res.data 是对象，提取 accounts 数组
       const data = res.data || []
-      accounts.value = Array.isArray(data) ? data : (data.accounts || [])
-      
+      accounts.value = Array.isArray(data) ? data : data.accounts || []
+
       // 处理分页信息
       if (data.pagination) {
         currentPage.value = data.pagination.current_page || page
@@ -274,7 +320,7 @@ const loadAccounts = async (page = 1) => {
         totalPages.value = 1
         currentPage.value = 1
       }
-      
+
       // 批量加载标签数据
       if (accounts.value.length > 0) {
         loadTagsData()
@@ -292,7 +338,7 @@ const loadTagsData = async () => {
   try {
     const ids = accounts.value.map((a: any) => Number(a.id))
     if (ids.length === 0) return
-    
+
     const res = await mailboxTagsAPI.getBatchMailboxTags('external', ids)
     if (res.data) {
       tagsData.value = res.data
@@ -330,7 +376,7 @@ const handleBatchDelete = (ids: number[]) => {
 const handleBatchShare = (ids: number[]) => {
   console.log('🟢 外部邮箱 - 批量分享，ids:', ids)
   // 获取选中的邮箱对象
-  const selectedAccounts = accounts.value.filter(a => ids.includes(a.id))
+  const selectedAccounts = accounts.value.filter((a) => ids.includes(a.id))
   emit('share', selectedAccounts)
 }
 
@@ -342,9 +388,7 @@ const copy = (text: string) => {
 const confirmDelete = async () => {
   deleting.value = true
   try {
-    await Promise.all(
-      isDeleting.value.ids.map(id => unifiedAPI.deleteMailbox(id, 'external'))
-    )
+    await Promise.all(isDeleting.value.ids.map((id) => unifiedAPI.deleteMailbox(id, 'external')))
     showMessage(`已删除 ${isDeleting.value.ids.length} 个账号`)
     await loadAccounts()
     emit('refresh')
@@ -365,7 +409,6 @@ const fetchSingleMailbox = async (accountId: number) => {
 
   // 立即显示收取中状态
   fetchingIds.value.push(accountId)
-  showMessage('正在收取邮件...', 'success')
 
   try {
     const account = accounts.value.find((a: any) => a.id === accountId)
@@ -379,34 +422,68 @@ const fetchSingleMailbox = async (accountId: number) => {
       return
     }
 
+    showMessage('正在收取邮件...', 'primary', 0)
+
     if (account.auth_type === 'oauth2') {
       // OAuth2 邮箱 + 桌面端：先获取 token，再走本地 IMAP XOAUTH2
       try {
-        const tokenRes = await batchLoginAPI.getOAuth2AccessToken(account.id)
-        if (tokenRes.code !== 0) {
-          throw new Error(tokenRes.message || '获取 token 失败')
-        }
-
-        const { access_token: oauthAccessToken, imap_host, imap_port, email: oauthEmail } = tokenRes.data
         const { invoke } = await import('@tauri-apps/api/core')
         const token = localStorage.getItem('token') || ''
         const serverUrl = getServerUrl()
 
-        await invoke('fetch_emails', {
-          mailboxId: account.id,
-          email: oauthEmail,
-          password: '',
-          protocol: 'imap',
-          host: imap_host,
-          port: imap_port,
-          token,
-          serverUrl,
-          authType: 'oauth2',
-          accessToken: oauthAccessToken,
+        await runDesktopOAuthMailboxAction(account.id, async (tokenPayload) => {
+          return invoke('fetch_emails', {
+            mailboxId: account.id,
+            email: tokenPayload.email,
+            password: '',
+            protocol: 'imap',
+            host: tokenPayload.imap_host,
+            port: tokenPayload.imap_port,
+            token,
+            serverUrl,
+            authType: 'oauth2',
+            accessToken: tokenPayload.access_token
+          })
         })
         showMessage('收取成功', 'success')
       } catch (e: any) {
-        showMessage(typeof e === 'string' ? e : (e.message || '收取失败'), 'error')
+        const message = typeof e === 'string' ? e : e.message || '收取失败'
+        if (String(account.password || '').trim()) {
+          try {
+            const { invoke } = await import('@tauri-apps/api/core')
+            const token = localStorage.getItem('token') || ''
+            const serverUrl = getServerUrl()
+            await invoke('recover_and_fetch_external_mailbox', {
+              mailboxId: account.id,
+              token,
+              serverUrl
+            })
+            window.dispatchEvent(
+              new CustomEvent('external-mailbox-recovered', {
+                detail: { mailboxId: account.id }
+              })
+            )
+            showMessage('收取成功', 'success')
+          } catch (recoveryError: any) {
+            const recoveryMessage = normalizeOAuthRecoveryErrorMessage(
+              typeof recoveryError === 'string' ? recoveryError : recoveryError?.message || message
+            )
+            try {
+              await batchLoginAPI.updateMailboxStatus(account.id, 'failed', recoveryMessage)
+              window.dispatchEvent(
+                new CustomEvent('external-mailbox-updated', {
+                  detail: { mailboxId: account.id }
+                })
+              )
+            } catch (statusError) {}
+            showMessage(
+              recoveryMessage,
+              'error'
+            )
+          }
+        } else {
+          emit('oauth-reauthorize', account)
+        }
       }
     } else {
       try {
@@ -428,16 +505,16 @@ const fetchSingleMailbox = async (accountId: number) => {
         })
         showMessage('收取成功', 'success')
       } catch (e: any) {
-        showMessage(typeof e === 'string' ? e : (e.message || '收取失败'), 'error')
+        showMessage(typeof e === 'string' ? e : e.message || '收取失败', 'error')
       }
     }
     await loadAccounts()
     emit('refresh')
   } catch (e: any) {
-    showMessage(typeof e === 'string' ? e : (e.message || '收取失败'), 'error')
+    showMessage(typeof e === 'string' ? e : e.message || '收取失败', 'error')
     await loadAccounts()
   } finally {
-    fetchingIds.value = fetchingIds.value.filter(id => id !== accountId)
+    fetchingIds.value = fetchingIds.value.filter((id) => id !== accountId)
   }
 }
 
@@ -459,11 +536,21 @@ defineExpose({
     }
   }
 })
+
+onMounted(() => {
+  window.addEventListener('external-mailbox-recovered', handleRecoveredMailbox)
+  window.addEventListener('external-mailbox-updated', handleRecoveredMailbox)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('external-mailbox-recovered', handleRecoveredMailbox)
+  window.removeEventListener('external-mailbox-updated', handleRecoveredMailbox)
+})
 </script>
 
 <style scoped>
 /* 自定义 checkbox 样式 */
-input[type="checkbox"] {
+input[type='checkbox'] {
   appearance: none;
   -webkit-appearance: none;
   width: 16px;
@@ -475,12 +562,12 @@ input[type="checkbox"] {
   background-color: white;
 }
 
-input[type="checkbox"]:checked {
+input[type='checkbox']:checked {
   background-color: #22c55e;
   border-color: #22c55e;
 }
 
-input[type="checkbox"]:checked::after {
+input[type='checkbox']:checked::after {
   content: '';
   position: absolute;
   left: 4px;

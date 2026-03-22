@@ -706,6 +706,7 @@ defineExpose({
     oauthStopRequested.value = false
     oauthAuthPhase.value = 'idle'
     oauthErrorMessage.value = ''
-  }
+  },
+  startOAuthAuthorization
 })
 </script>

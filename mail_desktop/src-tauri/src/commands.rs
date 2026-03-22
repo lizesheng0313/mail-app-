@@ -2,20 +2,139 @@ use crate::mail;
 use crate::mail::discovery::{dedupe_candidates, extract_root_domain, query_primary_mx, query_srv_records};
 use crate::mail::provider_constants::{find_hosted_provider_by_mx, find_known_provider};
 use crate::mail::types::{get_server_config, EmailData, FetchResult, LoginResult};
-use log::{error, info};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 use tauri_plugin_updater::UpdaterExt;
 
 const INITIAL_HISTORY_FETCH_LIMIT: usize = 2000;
 const INCREMENTAL_FETCH_LIMIT: usize = 200;
 const HISTORY_BACKFILL_THRESHOLD: usize = 100;
+const AUTO_RECOVERY_MAX_FAILURES: u32 = 3;
+const AUTO_RECOVERY_WINDOW_MS: i64 = 30 * 60 * 1000;
+const AUTO_RECOVERY_LIMIT_MARKER: &str = "__AUTO_RECOVERY_LIMIT__::";
+
+#[derive(Debug, Clone, Copy)]
+struct RecoveryRetryState {
+    failed_count: u32,
+    window_started_at_ms: i64,
+}
+
+static RECOVERY_RETRY_STATES: OnceLock<Mutex<HashMap<i64, RecoveryRetryState>>> = OnceLock::new();
+
+fn recovery_retry_states() -> &'static Mutex<HashMap<i64, RecoveryRetryState>> {
+    RECOVERY_RETRY_STATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn current_time_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn begin_recovery_attempt(mailbox_id: i64) -> Result<(), String> {
+    let now = current_time_ms();
+    let mut states = recovery_retry_states()
+        .lock()
+        .map_err(|_| "自动恢复状态锁定失败".to_string())?;
+
+    let state = states.entry(mailbox_id).or_insert(RecoveryRetryState {
+        failed_count: 0,
+        window_started_at_ms: now,
+    });
+
+    if now - state.window_started_at_ms > AUTO_RECOVERY_WINDOW_MS {
+        state.failed_count = 0;
+        state.window_started_at_ms = now;
+    }
+
+    if state.failed_count >= AUTO_RECOVERY_MAX_FAILURES {
+        warn!(
+            "自动恢复已达到失败上限: mailbox_id={}, failed_count={}",
+            mailbox_id, state.failed_count
+        );
+        return Err(format!(
+            "{}{}",
+            AUTO_RECOVERY_LIMIT_MARKER, "邮箱或授权码错误，请检查后重试"
+        ));
+    }
+
+    Ok(())
+}
+
+fn mark_recovery_success(mailbox_id: i64) {
+    if let Ok(mut states) = recovery_retry_states().lock() {
+        states.remove(&mailbox_id);
+    }
+}
+
+fn mark_recovery_failure(mailbox_id: i64) -> u32 {
+    let now = current_time_ms();
+    if let Ok(mut states) = recovery_retry_states().lock() {
+        let state = states.entry(mailbox_id).or_insert(RecoveryRetryState {
+            failed_count: 0,
+            window_started_at_ms: now,
+        });
+
+        if now - state.window_started_at_ms > AUTO_RECOVERY_WINDOW_MS {
+            state.failed_count = 0;
+            state.window_started_at_ms = now;
+        }
+
+        state.failed_count += 1;
+        return state.failed_count;
+    }
+
+    AUTO_RECOVERY_MAX_FAILURES
+}
+
+fn finalize_recovery_failure(mailbox_id: i64, message: String) -> String {
+    let count = mark_recovery_failure(mailbox_id);
+    if count >= AUTO_RECOVERY_MAX_FAILURES {
+        warn!(
+            "自动恢复连续失败达到上限: mailbox_id={}, failed_count={}, message={}",
+            mailbox_id, count, message
+        );
+        return format!("{}{}", AUTO_RECOVERY_LIMIT_MARKER, message);
+    }
+    message
+}
 
 /// 同步邮件请求（发送到远程服务器）
 #[derive(Debug, Serialize)]
 pub struct SyncEmailsRequest {
     pub mailbox_id: i64,
     pub emails: Vec<EmailData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiEnvelope<T> {
+    code: i32,
+    message: String,
+    data: Option<T>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MailboxReloginConfig {
+    email: String,
+    password: String,
+    protocol: String,
+    pop3_host: Option<String>,
+    pop3_port: Option<u16>,
+    imap_host: Option<String>,
+    imap_port: Option<u16>,
+}
+
+#[derive(Debug, Serialize)]
+struct RecoverPasswordLoginRequest {
+    password: String,
+    protocol: String,
+    host: String,
+    port: u16,
+    smtp_host: Option<String>,
+    smtp_port: Option<u16>,
+    smtp_verified: bool,
+    smtp_error: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,6 +343,273 @@ async fn resolve_fetch_policy(server_url: &str, token: &str, mailbox_id: i64) ->
     }
 }
 
+async fn load_mailbox_relogin_config(
+    server_url: &str,
+    token: &str,
+    mailbox_id: i64,
+) -> Result<MailboxReloginConfig, String> {
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/unified-emails/external-mailboxes/{}/relogin-config",
+        server_url.trim_end_matches('/'),
+        mailbox_id
+    );
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .map_err(|e| format!("获取重登配置失败: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("获取重登配置失败 {}: {}", status, body));
+    }
+
+    let body: ApiEnvelope<MailboxReloginConfig> = response
+        .json()
+        .await
+        .map_err(|e| format!("解析重登配置失败: {}", e))?;
+
+    if body.code != 0 {
+        return Err(if body.message.is_empty() {
+            "获取重登配置失败".to_string()
+        } else {
+            body.message
+        });
+    }
+
+    body.data.ok_or_else(|| "重登配置为空".to_string())
+}
+
+fn resolve_relogin_server(config: &MailboxReloginConfig) -> Result<(String, u16, String), String> {
+    let protocol = if config.protocol.to_lowercase() == "pop3" {
+        "pop3".to_string()
+    } else {
+        "imap".to_string()
+    };
+
+    let (host, port) = if protocol == "imap" {
+        (
+            config.imap_host.clone().unwrap_or_default(),
+            config.imap_port.unwrap_or(993),
+        )
+    } else {
+        (
+            config.pop3_host.clone().unwrap_or_default(),
+            config.pop3_port.unwrap_or(995),
+        )
+    };
+
+    if host.trim().is_empty() {
+        return Err("重登配置缺少服务器地址".to_string());
+    }
+
+    Ok((host, port, protocol))
+}
+
+async fn activate_mailbox_password_login(
+    server_url: &str,
+    token: &str,
+    mailbox_id: i64,
+    password: &str,
+    login_result: &LoginResult,
+) -> Result<(), String> {
+    let protocol = login_result
+        .protocol
+        .clone()
+        .unwrap_or_else(|| "imap".to_string());
+    let host = login_result
+        .host
+        .clone()
+        .ok_or_else(|| "重登成功但缺少服务器地址".to_string())?;
+    let port = login_result
+        .port
+        .ok_or_else(|| "重登成功但缺少服务器端口".to_string())?;
+
+    let request_body = RecoverPasswordLoginRequest {
+        password: password.to_string(),
+        protocol,
+        host,
+        port,
+        smtp_host: login_result.smtp_host.clone(),
+        smtp_port: login_result.smtp_port,
+        smtp_verified: login_result.smtp_verified,
+        smtp_error: login_result.smtp_error.clone(),
+    };
+
+    let client = reqwest::Client::new();
+    let url = format!(
+        "{}/unified-emails/external-mailboxes/{}/recover-password-login",
+        server_url.trim_end_matches('/'),
+        mailbox_id
+    );
+
+    let response = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("回写账号恢复状态失败: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("回写账号恢复状态失败 {}: {}", status, body));
+    }
+
+    let body: ApiEnvelope<serde_json::Value> = response
+        .json()
+        .await
+        .map_err(|e| format!("解析账号恢复响应失败: {}", e))?;
+
+    if body.code != 0 {
+        return Err(if body.message.is_empty() {
+            "回写账号恢复状态失败".to_string()
+        } else {
+            body.message
+        });
+    }
+
+    Ok(())
+}
+
+async fn recover_external_mailbox_session_inner(
+    mailbox_id: i64,
+    token: &str,
+    server_url: &str,
+) -> Result<(MailboxReloginConfig, LoginResult), String> {
+    begin_recovery_attempt(mailbox_id)?;
+
+    let config = load_mailbox_relogin_config(server_url, token, mailbox_id)
+        .await
+        .map_err(|e| finalize_recovery_failure(mailbox_id, e))?;
+    let (host, port, protocol) = resolve_relogin_server(&config)?;
+
+    let login_result = add_external_mailbox(
+        config.email.clone(),
+        config.password.clone(),
+        protocol,
+        Some(host),
+        Some(port),
+    )
+    .await
+    .map_err(|e| finalize_recovery_failure(mailbox_id, e))?;
+
+    if !login_result.success {
+        return Err(finalize_recovery_failure(mailbox_id, login_result.message.clone()));
+    }
+
+    activate_mailbox_password_login(
+        server_url,
+        token,
+        mailbox_id,
+        &config.password,
+        &login_result,
+    )
+    .await
+    .map_err(|e| finalize_recovery_failure(mailbox_id, e))?;
+
+    mark_recovery_success(mailbox_id);
+
+    Ok((config, login_result))
+}
+
+async fn fetch_mailbox_via_relogin_config(
+    server_url: &str,
+    token: &str,
+    mailbox_id: i64,
+    limit: usize,
+    fetch_oldest: bool,
+) -> Result<FetchResult, String> {
+    let (config, login_result) = recover_external_mailbox_session_inner(mailbox_id, token, server_url).await?;
+    let protocol = login_result
+        .protocol
+        .clone()
+        .unwrap_or_else(|| "imap".to_string());
+    let host = login_result
+        .host
+        .clone()
+        .ok_or_else(|| "自动重登成功但缺少服务器地址".to_string())?;
+    let port = login_result
+        .port
+        .ok_or_else(|| "自动重登成功但缺少服务器端口".to_string())?;
+
+    info!(
+        "开始自动重登收取: mailbox_id={} email={} ({} -> {}:{})",
+        mailbox_id, config.email, protocol, host, port
+    );
+
+    if protocol == "imap" {
+        mail::imap::fetch_emails(
+            &config.email,
+            &config.password,
+            &host,
+            port,
+            limit,
+            fetch_oldest,
+        )
+        .await
+    } else {
+        mail::pop3::fetch_emails(
+            &config.email,
+            &config.password,
+            &host,
+            port,
+            limit,
+            fetch_oldest,
+        )
+        .await
+    }
+}
+
+#[tauri::command]
+pub async fn recover_external_mailbox_session(
+    mailbox_id: i64,
+    token: String,
+    server_url: String,
+) -> Result<LoginResult, String> {
+    let (_, login_result) =
+        recover_external_mailbox_session_inner(mailbox_id, &token, &server_url).await?;
+    Ok(login_result)
+}
+
+#[tauri::command]
+pub async fn recover_and_fetch_external_mailbox(
+    mailbox_id: i64,
+    token: String,
+    server_url: String,
+) -> Result<FetchResult, String> {
+    let (fetch_limit, fetch_oldest) = resolve_fetch_policy(&server_url, &token, mailbox_id).await;
+    let result =
+        fetch_mailbox_via_relogin_config(&server_url, &token, mailbox_id, fetch_limit, fetch_oldest)
+            .await?;
+
+    if result.success && !result.emails.is_empty() {
+        match sync_emails_to_server(&server_url, &token, mailbox_id, &result.emails).await {
+            Ok(new_count) => {
+                return Ok(FetchResult {
+                    success: true,
+                    message: format!("收取成功，新增 {} 封邮件", new_count),
+                    emails: vec![],
+                    count: new_count,
+                });
+            }
+            Err(e) => {
+                error!("自动恢复后同步邮件到服务器失败: {}", e);
+            }
+        }
+    }
+
+    Ok(FetchResult {
+        emails: vec![],
+        ..result
+    })
+}
+
 /// 收取邮件
 /// 前端调用：invoke('fetch_emails', { mailboxId, email, password, protocol, host?, port?, token, serverUrl, authType?, accessToken? })
 #[tauri::command]
@@ -284,8 +670,25 @@ pub async fn fetch_emails(
         {
             Ok(r) => r,
             Err(e) => {
-                error!("IMAP XOAUTH2 收取失败: {}", e);
-                return Err(e);
+                warn!("IMAP XOAUTH2 收取失败: {}", e);
+                match fetch_mailbox_via_relogin_config(
+                    &server_url,
+                    &token,
+                    mailbox_id,
+                    fetch_limit,
+                    fetch_oldest,
+                )
+                .await
+                {
+                    Ok(r) => {
+                        info!("✅ 自动重登成功，已恢复本地收取: {}", email);
+                        r
+                    }
+                    Err(relogin_error) => {
+                        error!("自动重登失败: {}", relogin_error);
+                        return Err(format!("{}；自动重登失败: {}", e, relogin_error));
+                    }
+                }
             }
         }
     } else if final_protocol.to_lowercase() == "imap" {

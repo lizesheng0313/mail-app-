@@ -1,6 +1,6 @@
 <template>
   <div 
-    class="fixed bottom-6 z-40 transform -translate-x-1/2"
+    class="fixed bottom-6 z-[120] transform -translate-x-1/2"
     :class="positionClass"
   >
     <div class="bg-white rounded-lg shadow-xl border border-gray-200 px-6 py-4 flex items-center space-x-4 min-w-[400px]">

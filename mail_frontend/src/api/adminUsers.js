@@ -28,6 +28,26 @@ export const adminUsersApi = {
   },
 
   /**
+   * 更新用户账号状态
+   * @param {number} userId - 用户ID
+   * @param {Object} data - 更新数据
+   * @param {boolean} data.is_active - 是否启用账号
+   */
+  updateUserStatus(userId, data) {
+    return api.put(`/admin/users/${userId}/status`, data)
+  },
+
+  /**
+   * 批量更新用户账号状态
+   * @param {Object} data - 更新数据
+   * @param {number[]} data.user_ids - 用户ID列表
+   * @param {boolean} data.is_active - 是否启用账号
+   */
+  batchUpdateUserStatus(data) {
+    return api.put('/admin/users/batch-status', data)
+  },
+
+  /**
    * 获取用户代理使用情况
    * @param {number} userId - 用户ID
    */

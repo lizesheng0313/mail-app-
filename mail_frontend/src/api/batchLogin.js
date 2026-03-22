@@ -10,10 +10,48 @@ export const batchLoginAPI = {
     api.post('/unified-emails/external-mailboxes', accountData, requestConfig),
 
   // 获取邮箱账号列表
-  getAccounts: (page = 1, pageSize = 20) =>
+  getAccounts: (page = 1, pageSize = 20, requestConfig = {}) =>
     api.get('/unified-emails/external-mailboxes', {
-      params: { page, page_size: pageSize }
+      params: { page, page_size: pageSize },
+      ...requestConfig
     }),
+
+  // 获取全部邮箱账号（自动翻页）
+  getAllAccounts: async (pageSize = 100, requestConfig = {}) => {
+    const accounts = []
+    let page = 1
+    let totalPages = 1
+
+    while (page <= totalPages) {
+      const response = await batchLoginAPI.getAccounts(page, pageSize, requestConfig)
+      if (response.code !== 0) {
+        return response
+      }
+
+      const data = response.data || {}
+      const list = Array.isArray(data) ? data : data.accounts || []
+      accounts.push(...list)
+
+      const pagination = Array.isArray(data) ? null : data.pagination
+      if (pagination?.total_pages) {
+        totalPages = Number(pagination.total_pages || 1)
+      } else if (list.length < pageSize) {
+        totalPages = page
+      } else {
+        totalPages = page + 1
+      }
+
+      page += 1
+    }
+
+    return {
+      code: 0,
+      message: '获取成功',
+      data: {
+        accounts
+      }
+    }
+  },
 
   // 批量登录
   batchLogin: (accountIds = []) =>
@@ -65,12 +103,12 @@ export const batchLoginAPI = {
   },
 
   // 手动刷新 OAuth2 token
-  refreshOAuth2Token: (mailboxId) =>
-    api.post(`/oauth2/mailboxes/${mailboxId}/refresh`),
+  refreshOAuth2Token: (mailboxId, requestConfig = {}) =>
+    api.post(`/oauth2/mailboxes/${mailboxId}/refresh`, null, requestConfig),
 
   // 获取 OAuth2 access_token（桌面端本地 IMAP XOAUTH2 用）
-  getOAuth2AccessToken: (mailboxId) =>
-    api.post(`/oauth2/mailboxes/${mailboxId}/access-token`),
+  getOAuth2AccessToken: (mailboxId, requestConfig = {}) =>
+    api.post(`/oauth2/mailboxes/${mailboxId}/access-token`, null, requestConfig),
 }
 
 export default batchLoginAPI

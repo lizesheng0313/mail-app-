@@ -6,7 +6,7 @@ import api from '@/services/api'
 
 export const userAPI = {
   // 获取用户信息
-  getProfile: () => api.get('/users/me'),
+  getProfile: (params = {}) => api.get('/users/me', { params }),
 
   // 更新用户信息
   updateProfile: (data) => api.patch('/users/me', data),

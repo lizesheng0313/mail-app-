@@ -291,6 +291,16 @@ const announcements = ref<any[]>([])
 const announcementsLoading = ref(false)
 const unreadCount = ref(0)
 
+const normalizeAnnouncementScene = (scene?: string | null) => {
+  return (scene || '').trim().toLowerCase() || 'general'
+}
+
+const filterVisibleAnnouncements = (items: any[]) => {
+  return (items || []).filter(
+    (item: any) => normalizeAnnouncementScene(item?.scene) !== 'release_note'
+  )
+}
+
 // 跳转到公告详情页
 const goToAnnouncement = async (announcementId: number) => {
   console.log('点击公告，ID:', announcementId)
@@ -332,7 +342,7 @@ const loadAnnouncements = async () => {
   try {
     const result = await api.get('/announcements/', { params: { page: 1, page_size: 10 } })
     if (result.code === 0) {
-      announcements.value = result.data.items || []
+      announcements.value = filterVisibleAnnouncements(result.data.items || [])
       // 更新未读数量
       await loadUnreadCount()
     }
@@ -350,7 +360,30 @@ const loadUnreadCount = async () => {
   try {
     const result = await api.get('/announcements/unread/count')
     if (result.code === 0) {
-      unreadCount.value = result.data.count || 0
+      const nextUnreadCount = result.data.count || 0
+
+      if (nextUnreadCount <= 0) {
+        unreadCount.value = 0
+        return
+      }
+
+      const listResult = await api.get('/announcements/', {
+        params: { page: 1, page_size: 10 },
+        suppressErrorMessage: true
+      } as any)
+
+      if (listResult.code === 0) {
+        const visibleAnnouncements = filterVisibleAnnouncements(listResult.data.items || [])
+        if (visibleAnnouncements.length === 0) {
+          unreadCount.value = 0
+          if (!showAnnouncements.value) {
+            announcements.value = []
+          }
+          return
+        }
+      }
+
+      unreadCount.value = nextUnreadCount
     }
   } catch (error) {
     console.error('加载未读数量失败:', error)

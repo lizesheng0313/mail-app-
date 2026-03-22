@@ -9,9 +9,10 @@
 
 <script setup lang="ts">
 import { RouterView, useRouter } from 'vue-router'
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { usePageTracking } from '@/composables/usePageTracking'
+import { useDesktopOAuthKeepAlive } from '@/composables/useDesktopOAuthKeepAlive'
 import FloatingFeedback from '@/components/FloatingFeedback/index.vue'
 import SystemMaintenance from '@/components/SystemMaintenance/index.vue'
 import AppUpdater from '@/components/AppUpdater/index.vue'
@@ -23,9 +24,10 @@ const userStore = useUserStore()
 const maintenanceRef = ref<InstanceType<typeof SystemMaintenance>>()
 const updaterRef = ref<InstanceType<typeof AppUpdater>>()
 let unlistenOAuthCallback: null | (() => void) = null
+const desktopOAuthKeepAlive = useDesktopOAuthKeepAlive()
 
 // 启用页面访问统计
-const { recordPageView } = usePageTracking()
+usePageTracking()
 
 // 应用启动时检查认证状态
 onMounted(async () => {
@@ -55,6 +57,7 @@ onMounted(async () => {
         if (path === '/oauth2/callback') {
           window.dispatchEvent(new CustomEvent('oauth2-callback', { detail: query }))
           if (query.oauth2_success === '1') {
+            void desktopOAuthKeepAlive.refreshNow()
             if (query.oauth2_warning) {
               showMessage(`邮箱授权成功${query.email ? `: ${query.email}` : ''}，但首次收取失败`, 'warning')
             } else {
@@ -81,12 +84,30 @@ onMounted(async () => {
     console.error('checkAuth failed:', e)
   }
 
+  if (isTauri() && userStore.isAuthenticated) {
+    await desktopOAuthKeepAlive.start()
+  }
+
   registerMaintenanceCallback(() => {
     maintenanceRef.value?.show()
   })
 })
 
+watch(
+  () => userStore.isAuthenticated,
+  async (isAuthenticated) => {
+    if (!isTauri()) return
+
+    if (isAuthenticated) {
+      await desktopOAuthKeepAlive.start()
+    } else {
+      desktopOAuthKeepAlive.stop()
+    }
+  }
+)
+
 onBeforeUnmount(() => {
   unlistenOAuthCallback?.()
+  desktopOAuthKeepAlive.stop()
 })
 </script>

@@ -6,9 +6,6 @@ on:
       version:
         description: '版本号 (例如 1.2.0)'
         required: true
-      release_notes:
-        description: '更新内容（支持多行）'
-        required: false
 
 env:
   APP_NAME: mail-desktop
@@ -105,18 +102,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Update download page
-        run: |
-          sed -i "s/版本 [0-9.]*[0-9]/版本 ${{ github.event.inputs.version }}/g" mail_frontend/src/views/download/index.vue
-          sed -i "s/mail-desktop_[0-9.]*[0-9]_/mail-desktop_${{ github.event.inputs.version }}_/g" mail_frontend/src/views/download/index.vue
-          cat mail_frontend/src/views/download/index.vue | grep -E "版本|mail-desktop_"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
-      - name: Commit download page changes
+      - name: Update desktop release config
+        run: |
+          node scripts/update_desktop_release.js "${{ github.event.inputs.version }}"
+          cat mail_frontend/src/config/desktopRelease.ts
+
+      - name: Commit desktop release config changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add mail_frontend/src/views/download/index.vue
-          git commit -m "chore: 更新下载页版本号为 ${{ github.event.inputs.version }}" || echo "No changes"
+          git add mail_frontend/src/config/desktopRelease.ts
+          git commit -m "chore: 更新桌面端版本配置为 ${{ github.event.inputs.version }}" || echo "No changes"
           git push
 
       - name: Create and push tag
@@ -169,7 +170,10 @@ jobs:
         with:
           tag_name: v${{ github.event.inputs.version }}
           name: v${{ github.event.inputs.version }}
-          body: ${{ github.event.inputs.release_notes || '优化体验并修复已知问题' }}
+          body: |
+            桌面端 v${{ github.event.inputs.version }} 已发布。
+            
+            详细更新说明请在后台维护对应版本说明。
           draft: false
           prerelease: false
           files: |

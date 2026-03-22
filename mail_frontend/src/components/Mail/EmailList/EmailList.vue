@@ -3,18 +3,20 @@
     <!-- 标题栏 -->
     <div class="border-b border-gray-200 pb-4 mb-4">
       <div class="flex justify-between items-center flex-wrap gap-2">
-        <div class="flex items-center gap-2 flex-shrink-0">
+        <div class="flex items-center flex-shrink-0">
           <h2 class="text-base font-semibold text-black whitespace-nowrap">{{ title }}</h2>
 
           <!-- 自动刷新倒计时 -->
-          <div v-if="autoRefresh && autoRefresh.countdown.value > 0" class="flex items-center text-xs text-gray-500 whitespace-nowrap">
+          <div v-if="autoRefresh && autoRefresh.countdown.value > 0" class="ml-2 flex items-center text-xs text-gray-500 whitespace-nowrap">
             <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
             </svg>
-            <span>{{ autoRefresh.countdown.value }}s</span>
+            <span class="inline-block w-[1.75rem] tabular-nums">{{ autoRefresh.countdown.value }}s</span>
           </div>
 
-          <slot name="title-extra"></slot>
+          <div class="ml-0.5 flex items-center">
+            <slot name="title-extra"></slot>
+          </div>
         </div>
 
         <div class="flex items-center gap-1.5 flex-shrink-0">

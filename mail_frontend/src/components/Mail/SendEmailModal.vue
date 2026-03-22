@@ -138,6 +138,7 @@ import { isTauri } from '@/services/api'
 import BaseModal from '@/components/BaseModal/index.vue'
 import smtpAccountsAPI from '@/api/smtpAccounts'
 import { showMessage } from '@/utils/message'
+import { buildDesktopSendableSmtpAccountMap } from '@/utils/smtpCapability'
 
 async function getTauriInvoke() {
   if (!isTauri()) return null
@@ -189,11 +190,7 @@ const localVisible = computed({
 const smtpAccounts = ref([])
 
 const activeSmtpAccountMap = computed(() => {
-  return new Map(
-    smtpAccounts.value
-      .filter((account) => account.status === 'active')
-      .map((account) => [String(account.email || '').toLowerCase(), account])
-  )
+  return buildDesktopSendableSmtpAccountMap(smtpAccounts.value)
 })
 
 const availableMailboxes = computed(() => {

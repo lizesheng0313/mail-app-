@@ -54,7 +54,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { isTauri } from '@/services/api'
+import api, { isTauri } from '@/services/api'
 
 const showModal = ref(false)
 const phase = ref<'confirm' | 'downloading' | 'error'>('confirm')
@@ -66,6 +66,26 @@ const errorMsg = ref('')
 
 let pendingUpdate: any = null
 let updateMode: 'plugin' | 'fallback' = 'plugin'
+
+async function resolveReleaseNotes(targetVersion: string, fallbackNotes = '') {
+  const defaultNotes = (fallbackNotes || '').trim()
+
+  try {
+    const result = await api.get('/announcements/release-note', {
+      params: {
+        client_type: 'desktop',
+        version: targetVersion
+      },
+      suppressErrorMessage: true
+    } as any)
+
+    const backendNotes = result?.data?.content?.trim?.() || ''
+    return backendNotes || defaultNotes
+  } catch (e: any) {
+    console.warn('[Updater] 获取后台版本说明失败，回退到更新清单说明:', e?.message || e)
+    return defaultNotes
+  }
+}
 
 function dismiss() {
   showModal.value = false
@@ -147,44 +167,36 @@ async function startUpdate() {
 }
 
 async function checkForUpdates() {
-  console.log('[Updater] 开始检查更新, isTauri:', isTauri())
   if (!isTauri()) return
 
   // 1. 优先用 updater 插件
   try {
-    console.log('[Updater] 尝试使用 updater 插件...')
     const { check } = await import('@tauri-apps/plugin-updater')
     const update = await check()
-    console.log('[Updater] 插件返回:', update)
     if (update) {
       pendingUpdate = update
       version.value = update.version
-      notes.value = update.body || update.notes || ''
+      notes.value = await resolveReleaseNotes(update.version, update.body || update.notes || '')
       updateMode = 'plugin'
       phase.value = 'confirm'
       showModal.value = true
       return // 插件检测到更新了，不用再查
     }
-    console.log('[Updater] 插件返回 null，尝试保底检查')
-  } catch (e: any) {
-    console.error('[Updater] 插件检查失败:', e?.message || e)
+  } catch (_e: any) {
   }
 
   // 2. 插件没检测到更新（返回null或报错），用 reqwest 再确认一次
   try {
-    console.log('[Updater] 开始保底检查...')
     const { invoke } = await import('@tauri-apps/api/core')
     const result = await invoke('check_for_update') as { version: string; notes: string } | null
-    console.log('[Updater] 保底检查返回:', result)
     if (result) {
       version.value = result.version
-      notes.value = result.notes || ''
+      notes.value = await resolveReleaseNotes(result.version, result.notes || '')
       updateMode = 'fallback'
       phase.value = 'confirm'
       showModal.value = true
     }
-  } catch (e: any) {
-    console.error('[Updater] 保底检查也失败:', e?.message || e)
+  } catch (_e: any) {
   }
 }
 

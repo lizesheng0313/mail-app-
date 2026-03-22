@@ -98,10 +98,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { formatTimestamp } from '@/utils/timeUtils'
 import { isTauri } from '@/services/api'
 import { batchLoginAPI } from '@/api/batchLogin'
+import { runDesktopOAuthMailboxAction } from '@/services/desktopOAuthMailbox'
 import { showMessage } from '@/utils/message'
 
 interface Email {
@@ -135,8 +136,6 @@ defineEmits<{
   expand: [email: Email]
 }>()
 
-const isFullscreen = ref(false)
-
 const attachments = computed(() => {
   return props.email?.attachments || []
 })
@@ -158,9 +157,10 @@ const formatFileSize = (bytes: number) => {
 
 const downloadAttachment = async (att: { id: number; filename: string }) => {
   if (!props.email) return
+  const currentEmail = props.email
 
   // 桌面端：本地 IMAP/POP3 实时取附件
-  if (isTauri() && props.email.message_id && props.email.mailbox_type === 'external') {
+  if (isTauri() && currentEmail.message_id && currentEmail.mailbox_type === 'external') {
     try {
       const { invoke } = await import('@tauri-apps/api/core')
       const { save } = await import('@tauri-apps/plugin-dialog')
@@ -173,7 +173,9 @@ const downloadAttachment = async (att: { id: number; filename: string }) => {
 
       // 获取邮箱连接信息
       const mailboxId = props.email.mailbox_id
-      const accountsRes = await batchLoginAPI.getAccounts(1, 100)
+      const accountsRes = await batchLoginAPI.getAllAccounts(100, {
+        suppressErrorMessage: true
+      })
       const accountsData = accountsRes?.data
       const accounts = Array.isArray(accountsData)
         ? accountsData
@@ -186,22 +188,36 @@ const downloadAttachment = async (att: { id: number; filename: string }) => {
       }
 
       const isOAuth2 = mailbox.auth_type === 'oauth2'
-      let accessToken = ''
       let host = mailbox.imap_host || ''
       let port = mailbox.imap_port || 993
       let protocol = mailbox.protocol || 'imap'
 
       if (isOAuth2) {
-        // OAuth2：获取 access_token + IMAP 配置
-        const tokenRes = await batchLoginAPI.getOAuth2AccessToken(mailboxId)
-        if (tokenRes.code !== 0) {
-          showMessage(tokenRes.message || '获取 token 失败', 'error')
-          return
-        }
-        accessToken = tokenRes.data.access_token
-        host = tokenRes.data.imap_host
-        port = tokenRes.data.imap_port
-        protocol = 'imap'
+        await runDesktopOAuthMailboxAction(mailboxId, async (tokenPayload) => {
+          host = tokenPayload.imap_host
+          port = tokenPayload.imap_port
+          protocol = 'imap'
+
+          await invoke('download_attachment', {
+            email: mailbox.email,
+            password: mailbox.password || '',
+            protocol,
+            host,
+            port,
+            messageId: currentEmail.message_id,
+            filename: att.filename,
+            savePath,
+            authType: 'oauth2',
+            accessToken: tokenPayload.access_token,
+            subject: currentEmail.subject || '',
+            fromAddr: currentEmail.from_addr || '',
+            toAddr: currentEmail.to_addr || '',
+            emailDateMs: Number(currentEmail.email_date || currentEmail.received_at || 0),
+          })
+        })
+
+        showMessage(`附件已保存至: ${savePath}`, 'success')
+        return
       } else if (protocol === 'pop3') {
         host = mailbox.pop3_host || ''
         port = mailbox.pop3_port || 995
@@ -213,15 +229,15 @@ const downloadAttachment = async (att: { id: number; filename: string }) => {
         protocol,
         host,
         port,
-        messageId: props.email.message_id,
+        messageId: currentEmail.message_id,
         filename: att.filename,
         savePath,
         authType: isOAuth2 ? 'oauth2' : 'password',
-        accessToken: isOAuth2 ? accessToken : undefined,
-        subject: props.email.subject || '',
-        fromAddr: props.email.from_addr || '',
-        toAddr: props.email.to_addr || '',
-        emailDateMs: Number(props.email.email_date || props.email.received_at || 0),
+        accessToken: undefined,
+        subject: currentEmail.subject || '',
+        fromAddr: currentEmail.from_addr || '',
+        toAddr: currentEmail.to_addr || '',
+        emailDateMs: Number(currentEmail.email_date || currentEmail.received_at || 0),
       })
 
       showMessage(`附件已保存至: ${savePath}`, 'success')

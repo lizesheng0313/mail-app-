@@ -50,6 +50,14 @@
                 <span class="text-black">最后登录:</span>
                 <span class="font-medium">{{ user.last_login ? formatDate(user.last_login) : '从未登录' }}</span>
               </div>
+              <div>
+                <span class="text-black">登录IP:</span>
+                <span class="font-medium">{{ user.last_login_ip || '-' }}</span>
+              </div>
+              <div>
+                <span class="text-black">登录地址:</span>
+                <span class="font-medium">{{ user.last_login_location || '-' }}</span>
+              </div>
             </div>
           </div>
         </div>

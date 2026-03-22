@@ -326,6 +326,7 @@ import { showMessage } from '@/utils/message'
 import { isTauri } from '@/services/api'
 import api from '@/services/api'
 import { formatTimestamp } from '@/utils/timeUtils'
+import { buildDesktopSendableSmtpAccountMap, normalizeSmtpEmail } from '@/utils/smtpCapability'
 
 async function getTauriInvoke() {
   if (!isTauri()) return null
@@ -403,11 +404,7 @@ const selectedAccountIds = computed(() => props.selectedMailboxIds || [])
 const isDesktop = computed(() => isTauri())
 
 const activeSmtpEmailMap = computed(() => {
-  return new Map(
-    smtpAccounts.value
-      .filter((account) => account.status === 'active')
-      .map((account) => [account.email, account])
-  )
+  return buildDesktopSendableSmtpAccountMap(smtpAccounts.value)
 })
 
 const externalAccountMap = computed(() => {
@@ -421,12 +418,12 @@ const selectedExternalAccounts = computed(() => {
 })
 
 // 发件能力以独立 smtp_accounts 表为准：
-// 只要该邮箱在 smtp_accounts 里是 active，就视为“可发件”。
+// 当前桌面端只认“密码型 SMTP + active + 配置完整”为可发件。
 const activeSmtpAccounts = computed<ActiveSmtpAccount[]>(() => {
   return selectedExternalAccounts.value
-    .filter((account) => activeSmtpEmailMap.value.has(account.email))
+    .filter((account) => activeSmtpEmailMap.value.has(normalizeSmtpEmail(account.email)))
     .map((account) => {
-      const smtp = activeSmtpEmailMap.value.get(account.email)!
+      const smtp = activeSmtpEmailMap.value.get(normalizeSmtpEmail(account.email))!
       return {
         ...account,
         smtp_host: smtp.smtp_host,

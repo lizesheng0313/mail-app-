@@ -3,7 +3,7 @@ mod commands;
 mod mail;
 mod oauth_callback_server;
 
-use commands::{add_external_mailbox, check_for_update, download_and_install_update, download_attachment, fetch_emails, get_attachment_path, is_tauri, open_external_url, open_local_attachment, send_smtp_email};
+use commands::{add_external_mailbox, check_for_update, download_and_install_update, download_attachment, fetch_emails, get_attachment_path, is_tauri, open_external_url, open_local_attachment, recover_and_fetch_external_mailbox, recover_external_mailbox_session, send_smtp_email};
 use oauth_callback_server::start_oauth_callback_server;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -49,6 +49,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             add_external_mailbox,
             fetch_emails,
+            recover_and_fetch_external_mailbox,
+            recover_external_mailbox_session,
             is_tauri,
             check_for_update,
             download_and_install_update,

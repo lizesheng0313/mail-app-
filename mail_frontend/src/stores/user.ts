@@ -27,7 +27,10 @@ export const useUserStore = defineStore('user', () => {
     } catch (error: any) {
       return {
         success: false,
-        error: error.response?.data?.message || error.response?.data?.detail || '发送验证码失败，请稍后重试'
+        error:
+          error.response?.data?.message ||
+          error.response?.data?.detail ||
+          '发送验证码失败，请稍后重试'
       }
     } finally {
       loading.value = false
@@ -65,11 +68,7 @@ export const useUserStore = defineStore('user', () => {
   const register = async (email: string, password: string, verificationCode: string) => {
     loading.value = true
     try {
-      const response: any = await authAPI.register(
-        email,
-        password,
-        verificationCode
-      )
+      const response: any = await authAPI.register(email, password, verificationCode)
 
       // 处理后端 {code: 0, message: "", data: {}} 格式
       if (response.code === 0 && response.data) {
@@ -89,7 +88,8 @@ export const useUserStore = defineStore('user', () => {
     } catch (error: any) {
       return {
         success: false,
-        error: error.response?.data?.message || error.response?.data?.detail || '注册失败，请稍后重试'
+        error:
+          error.response?.data?.message || error.response?.data?.detail || '注册失败，请稍后重试'
       }
     } finally {
       loading.value = false
@@ -112,7 +112,10 @@ export const useUserStore = defineStore('user', () => {
     } catch (error: any) {
       return {
         success: false,
-        error: error.response?.data?.message || error.response?.data?.detail || '密码重置失败，请稍后重试'
+        error:
+          error.response?.data?.message ||
+          error.response?.data?.detail ||
+          '密码重置失败，请稍后重试'
       }
     } finally {
       loading.value = false
@@ -139,7 +142,7 @@ export const useUserStore = defineStore('user', () => {
       isAuthenticated.value = true
       // 验证token是否有效，通过调用/users/me接口
       try {
-        const result = await updateUserProfile()
+        const result = await updateUserProfile(true)
         if (result?.success) {
           return true
         }
@@ -170,13 +173,13 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
-  const updateUserProfile = async () => {
+  const updateUserProfile = async (touchLogin = false) => {
     if (!isAuthenticated.value) {
       return { success: false, error: '未登录' }
     }
 
     try {
-      const response: any = await userAPI.getProfile()
+      const response: any = await userAPI.getProfile(touchLogin ? { touch_login: true } : {})
       if (response.code === 0 && response.data) {
         user.value = response.data
         return { success: true }

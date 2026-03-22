@@ -31,6 +31,22 @@
               查询
             </button>
           </div>
+          <div v-if="selectedUserIds.length > 0" class="flex items-center space-x-3">
+            <span class="text-sm text-gray-500">已选 {{ selectedUserIds.length }} 个</span>
+            <button
+              @click="openBatchDisableConfirm"
+              :disabled="updatingBatchStatus || selectedUserIds.length === 0"
+              class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              批量禁用
+            </button>
+            <button
+              @click="clearSelection"
+              class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md text-sm hover:bg-gray-50"
+            >
+              取消选择
+            </button>
+          </div>
         </div>
       </div>
 
@@ -40,22 +56,42 @@
         :pagination="pagination"
         :loading="loading"
         :show-page-size-selector="true"
-        :column-count="6"
+        :column-count="8"
         @page-change="changePage"
         @page-size-change="changePageSize"
       >
         <template #thead>
           <tr>
+            <th class="px-4 py-3 text-left">
+              <input
+                v-if="selectableUserIds.length > 0"
+                type="checkbox"
+                :checked="isAllSelected"
+                @change="toggleSelectAll($event)"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+            </th>
             <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">用户</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">状态</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">代理权限</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">使用情况</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">登录IP</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">注册时间</th>
             <th class="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">操作</th>
           </tr>
         </template>
         <template #tbody>
           <tr v-for="user in users" :key="user.id" class="hover:bg-gray-50">
+            <td class="px-4 py-4 whitespace-nowrap">
+              <input
+                v-if="isUserSelectable(user)"
+                type="checkbox"
+                :checked="selectedUserIds.includes(user.id)"
+                @change="toggleUserSelection(user.id, $event)"
+                class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
+              <span v-else class="text-xs text-gray-300">-</span>
+            </td>
             <!-- 用户 -->
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="flex items-center space-x-3">
@@ -102,6 +138,11 @@
               <div v-else class="text-gray-400">-</div>
             </td>
 
+            <td class="px-6 py-4 text-sm text-black">
+              <div>{{ user.last_login_ip || '-' }}</div>
+              <div class="text-xs text-gray-500 mt-1">{{ user.last_login_location || '-' }}</div>
+            </td>
+
             <!-- 注册时间 -->
             <td class="px-6 py-4 whitespace-nowrap text-sm text-black">
               {{ formatDate(user.created_at) }}
@@ -120,6 +161,13 @@
                 tooltip="查看详情"
                 variant="view"
                 @click="showUsageModal(user)"
+              />
+              <ActionButton
+                v-if="!user.is_admin"
+                :icon="user.is_active ? 'disable' : 'enable'"
+                :tooltip="user.is_active ? '禁用账号' : '启用账号'"
+                :variant="user.is_active ? 'disable' : 'enable'"
+                @click="toggleUserStatus(user)"
               />
               <ActionButton
                 v-if="user.proxy_enabled && user.proxy_quota > 0"
@@ -161,11 +209,39 @@
       @confirm="confirmResetQuota"
       @cancel="cancelReset"
     />
+
+    <ConfirmDialog
+      v-model:visible="showStatusConfirm"
+      :title="userToToggle?.is_active ? '确认禁用账号' : '确认启用账号'"
+      :message="userToToggle?.is_active
+        ? `确定要禁用用户 &quot;${userToToggle?.username}&quot; 吗？禁用后该账号将无法继续登录和使用系统。`
+        : `确定要启用用户 &quot;${userToToggle?.username}&quot; 吗？`"
+      :type="userToToggle?.is_active ? 'danger' : 'info'"
+      :confirm-text="userToToggle?.is_active ? '禁用' : '启用'"
+      :loading="updatingStatus"
+      :loading-text="userToToggle?.is_active ? '禁用中' : '启用中'"
+      :show-warning="Boolean(userToToggle?.is_active)"
+      @confirm="confirmToggleUserStatus"
+      @cancel="cancelToggleUserStatus"
+    />
+
+    <ConfirmDialog
+      v-model:visible="showBatchDisableConfirm"
+      title="确认批量禁用"
+      :message="`确定要批量禁用 ${selectedUserIds.length} 个账号吗？禁用后这些账号将无法继续登录和使用系统。`"
+      type="danger"
+      confirm-text="批量禁用"
+      :loading="updatingBatchStatus"
+      loading-text="禁用中"
+      :show-warning="true"
+      @confirm="confirmBatchDisable"
+      @cancel="cancelBatchDisable"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import BaseInput from '@/components/BaseInput/index.vue'
 import CustomSelect from '@/components/CustomSelect/index.vue'
 import ActionButton from '@/components/ActionButton/index.vue'
@@ -188,6 +264,12 @@ const proxyFilter = ref(null)
 const showResetConfirm = ref(false)
 const userToReset = ref(null)
 const resetting = ref(false)
+const showStatusConfirm = ref(false)
+const userToToggle = ref(null)
+const updatingStatus = ref(false)
+const selectedUserIds = ref([])
+const showBatchDisableConfirm = ref(false)
+const updatingBatchStatus = ref(false)
 
 // 分页信息
 const pagination = reactive({
@@ -203,6 +285,15 @@ const proxyFilterOptions = [
   { label: '已启用代理', value: true },
   { label: '未启用代理', value: false }
 ]
+
+const selectableUserIds = computed(() => users.value
+  .filter(user => isUserSelectable(user))
+  .map(user => user.id))
+
+const isAllSelected = computed(() => (
+  selectableUserIds.value.length > 0 &&
+  selectableUserIds.value.every(id => selectedUserIds.value.includes(id))
+))
 
 // 加载用户列表
 const loadUsers = async () => {
@@ -228,6 +319,7 @@ const loadUsers = async () => {
       users.value = response.data.users
       pagination.total = response.data.total
       pagination.pages = response.data.pages
+      clearSelection()
     }
   } catch (error) {
     console.error('加载用户列表失败:', error)
@@ -290,6 +382,69 @@ const resetUserQuota = (user) => {
   showResetConfirm.value = true
 }
 
+const isUserSelectable = (user) => !user.is_admin && user.is_active
+
+const toggleUserSelection = (userId, event) => {
+  const checked = event.target.checked
+  if (checked) {
+    if (!selectedUserIds.value.includes(userId)) {
+      selectedUserIds.value.push(userId)
+    }
+    return
+  }
+  selectedUserIds.value = selectedUserIds.value.filter(id => id !== userId)
+}
+
+const toggleSelectAll = (event) => {
+  const checked = event.target.checked
+  selectedUserIds.value = checked ? [...selectableUserIds.value] : []
+}
+
+const clearSelection = () => {
+  selectedUserIds.value = []
+}
+
+const openBatchDisableConfirm = () => {
+  if (selectedUserIds.value.length === 0) {
+    showMessage('请先选择要禁用的账号', 'warning')
+    return
+  }
+  showBatchDisableConfirm.value = true
+}
+
+// 切换用户状态
+const toggleUserStatus = (user) => {
+  userToToggle.value = user
+  showStatusConfirm.value = true
+}
+
+// 确认切换用户状态
+const confirmToggleUserStatus = async () => {
+  if (!userToToggle.value) return
+
+  try {
+    updatingStatus.value = true
+    const nextStatus = !userToToggle.value.is_active
+    const response = await adminUsersApi.updateUserStatus(userToToggle.value.id, {
+      is_active: nextStatus
+    })
+
+    if (response.code === 0) {
+      showMessage(nextStatus ? '账号已启用' : '账号已禁用', 'success')
+      showStatusConfirm.value = false
+      userToToggle.value = null
+      loadUsers()
+    } else {
+      showMessage(response.message || '操作失败', 'error')
+    }
+  } catch (error) {
+    console.error('更新用户状态失败:', error)
+    showMessage('操作失败', 'error')
+  } finally {
+    updatingStatus.value = false
+  }
+}
+
 // 确认重置配额
 const confirmResetQuota = async () => {
   if (!userToReset.value) return
@@ -316,6 +471,43 @@ const confirmResetQuota = async () => {
 // 取消重置
 const cancelReset = () => {
   userToReset.value = null
+}
+
+// 取消切换用户状态
+const cancelToggleUserStatus = () => {
+  showStatusConfirm.value = false
+  userToToggle.value = null
+}
+
+const confirmBatchDisable = async () => {
+  if (selectedUserIds.value.length === 0) return
+
+  try {
+    updatingBatchStatus.value = true
+    const response = await adminUsersApi.batchUpdateUserStatus({
+      user_ids: selectedUserIds.value,
+      is_active: false
+    })
+
+    if (response.code === 0) {
+      const updatedCount = response.data?.updated_count || 0
+      showMessage(`已禁用 ${updatedCount} 个账号`, 'success')
+      showBatchDisableConfirm.value = false
+      clearSelection()
+      loadUsers()
+    } else {
+      showMessage(response.message || '批量禁用失败', 'error')
+    }
+  } catch (error) {
+    console.error('批量禁用失败:', error)
+    showMessage('批量禁用失败', 'error')
+  } finally {
+    updatingBatchStatus.value = false
+  }
+}
+
+const cancelBatchDisable = () => {
+  showBatchDisableConfirm.value = false
 }
 
 // 生命周期

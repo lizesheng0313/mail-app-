@@ -215,6 +215,34 @@
           <div v-if="error" class="text-red-600 text-sm bg-red-50 p-3 rounded-lg">
             {{ error }}
           </div>
+
+          <div v-if="isAbnormalAccountError" class="rounded-xl border border-orange-200 bg-orange-50 p-4">
+            <div class="flex items-start">
+              <svg class="mt-0.5 h-5 w-5 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <div class="ml-3 flex-1">
+                <p class="text-sm font-medium text-orange-900">检测到账号异常</p>
+                <p class="mt-1 text-sm text-orange-800">如果确认账号未异常，请点击反馈联系管理员，或添加客服微信处理。</p>
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <a
+                    href="/feedback"
+                    class="inline-flex items-center rounded-lg bg-primary-600 px-3 py-2 text-xs font-medium text-white hover:bg-primary-700"
+                  >
+                    提交反馈
+                  </a>
+                  <button
+                    type="button"
+                    @click="copySupportWechat"
+                    class="inline-flex items-center rounded-lg border border-orange-300 bg-white px-3 py-2 text-xs font-medium text-orange-700 hover:bg-orange-100"
+                  >
+                    复制客服微信
+                  </button>
+                  <span class="inline-flex items-center text-xs text-orange-700">微信号：{{ supportWechat }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
           
           <button
             type="submit"
@@ -322,6 +350,7 @@ const showDomainHelp = ref(false)
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 const googleLoading = ref(false)
+const supportWechat = 'lizesheng1234'
 
 // 消息提示
 const message = ref('')
@@ -364,6 +393,8 @@ const isFormValid = computed(() => {
     )
   }
 })
+
+const isAbnormalAccountError = computed(() => error.value.includes('账户已被禁用'))
 
 const toggleMode = () => {
   isLoginMode.value = !isLoginMode.value
@@ -543,6 +574,15 @@ const loginWithGoogle = async () => {
   }
 }
 
+const copySupportWechat = async () => {
+  try {
+    await navigator.clipboard.writeText(supportWechat)
+    showMessage('客服微信已复制', 'success')
+  } catch (err) {
+    showMessage('复制失败，请手动复制', 'error')
+  }
+}
+
 // 页面加载时检查URL参数
 onMounted(() => {
   // 如果URL包含 mode=register 参数，切换到注册模式
@@ -552,6 +592,12 @@ onMounted(() => {
 
   if (typeof route.query.error === 'string' && route.query.error) {
     error.value = route.query.error
+  }
+
+  const storedLoginError = sessionStorage.getItem('login_error_message')
+  if (storedLoginError) {
+    error.value = storedLoginError
+    sessionStorage.removeItem('login_error_message')
   }
 })
 

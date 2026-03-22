@@ -24,7 +24,7 @@
               v-if="batchMode"
               type="checkbox"
               :checked="selectedIds.includes(mailbox.id)"
-              @click.stop
+              @click.stop="toggleSelection(mailbox.id)"
               class="w-4 h-4 mr-3 cursor-pointer flex-shrink-0"
             />
             <div class="flex-1 min-w-0">

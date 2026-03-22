@@ -9,8 +9,8 @@
             @click="switchMailboxType('system')"
             :class="[
               'px-6 py-2 text-sm font-medium border-b-2 transition-colors',
-              mailboxType === 'system' 
-                ? 'text-primary-600 border-primary-600' 
+              mailboxType === 'system'
+                ? 'text-primary-600 border-primary-600'
                 : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
             ]"
           >
@@ -20,8 +20,8 @@
             @click="switchMailboxType('external')"
             :class="[
               'px-6 py-2 text-sm font-medium border-b-2 transition-colors',
-              mailboxType === 'external' 
-                ? 'text-primary-600 border-primary-600' 
+              mailboxType === 'external'
+                ? 'text-primary-600 border-primary-600'
                 : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
             ]"
           >
@@ -63,25 +63,41 @@
             ]"
           >
             <!-- 返回图标 -->
-            <svg v-if="currentView === 'send-email'" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+            <svg
+              v-if="currentView === 'send-email'"
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 19l-7-7m0 0l7-7m-7 7h18"
+              ></path>
+            </svg>
             <!-- 编辑图标 -->
-            <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
-            
+            <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+              ></path>
+            </svg>
+
             {{ currentView === 'send-email' ? '返回收件箱' : '批量发送邮件' }}
           </button>
         </div>
       </div>
-      <section
-        v-else
-        class="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm"
-      >
+      <section v-else class="rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
         <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div class="min-w-0">
-            <h1 class="text-lg font-semibold text-gray-900">
-              肥猫猫邮箱服务
-            </h1>
+            <h1 class="text-lg font-semibold text-gray-900">肥猫猫邮箱服务</h1>
             <p class="mt-1 text-sm text-gray-600">
-              肥猫猫邮箱服务是一个邮箱管理平台，提供临时邮箱收件、第三方邮箱（Gmail / Outlook 等）批量接入、邮件批量收发以及邮件自动化工作流，帮助个人和团队更高效地管理多邮箱任务。
+              肥猫猫邮箱服务是一个邮箱管理平台，提供临时邮箱收件、第三方邮箱（Gmail / Outlook
+              等）批量接入、邮件批量收发以及邮件自动化工作流，帮助个人和团队更高效地管理多邮箱任务。
             </p>
           </div>
           <div class="flex flex-wrap gap-2 flex-shrink-0">
@@ -111,7 +127,7 @@
     <!-- 左栏：邮箱 -->
     <template #left>
       <TempMailbox v-if="!userStore.isAuthenticated" />
-      
+
       <!-- 系统邮箱和外部邮箱（两套独立组件，用v-show切换）-->
       <div v-else class="h-full">
         <div v-show="mailboxType === 'system'" class="h-full">
@@ -122,7 +138,7 @@
             @batch-mode-start="handleMailboxBatchStart"
           />
         </div>
-        
+
         <div v-show="mailboxType === 'external'" class="h-full">
           <ExternalMailboxList
             ref="externalMailboxListRef"
@@ -130,9 +146,11 @@
             :active-mailbox-id="selectedExternalMailboxId"
             :selected-send-ids="selectedExternalMailboxIds"
             :smtp-accounts="smtpAccounts"
+            :fetching-ids="externalMailboxFetchingIds"
             @select="handleSelectExternalMailbox"
             @share="handleShareMailboxes"
             @refresh="handleRefreshExternalEmails"
+            @oauth-reauthorize="handleOAuthMailboxReauthorize"
             @batch-mode-start="handleMailboxBatchStart"
           />
         </div>
@@ -156,53 +174,74 @@
           @batch-mode-start="handleEmailBatchStart"
           @search="handleSearchEmails"
         >
-        <template #title-extra>
-          <button
-            v-if="selectedMailboxId"
-            @click="backToAllEmails"
-            class="px-2 py-1 text-xs text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors whitespace-nowrap"
+          <template #title-extra>
+            <div
+              class="relative inline-flex shrink-0"
+              @mouseenter="showRefreshTooltipPopover"
+              @mouseleave="hideRefreshTooltip"
+            >
+              <button
+                ref="refreshButtonRef"
+                @click="handleImmediateRefreshSystemEmails"
+                :disabled="refreshingSystemEmails"
+                :aria-label="refreshingSystemEmails ? '刷新中' : '立即刷新'"
+                class="inline-flex items-center rounded p-1 text-gray-500 transition-colors hover:text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <BaseIcon
+                  name="refresh"
+                  size="sm"
+                  :class="{ 'animate-spin': refreshingSystemEmails }"
+                />
+              </button>
+            </div>
+            <button
+              v-if="selectedMailboxId"
+              @click="backToAllEmails"
+              class="ml-1.5 px-2 py-1 text-xs text-primary-600 hover:text-primary-700 hover:bg-primary-50 rounded transition-colors whitespace-nowrap"
+            >
+              查看全部
+            </button>
+          </template>
+
+          <template #actions>
+            <button
+              @click="toggleUnreadFilter"
+              :class="[
+                'px-2 py-1 text-xs rounded transition-colors whitespace-nowrap',
+                showOnlyUnread
+                  ? 'bg-green-500 text-white hover:bg-green-600'
+                  : 'text-gray-600 hover:text-gray-700 hover:bg-gray-50'
+              ]"
+            >
+              仅未读
+            </button>
+          </template>
+
+          <template
+            #content="{ emails, selectedId, batchMode, selectedIds, toggleSelection, onSelect }"
           >
-            查看全部
-          </button>
-        </template>
-        
-        <template #actions>
-          <button
-            @click="toggleUnreadFilter"
-            :class="[
-              'px-2 py-1 text-xs rounded transition-colors whitespace-nowrap',
-              showOnlyUnread 
-                ? 'bg-green-500 text-white hover:bg-green-600' 
-                : 'text-gray-600 hover:text-gray-700 hover:bg-gray-50'
-            ]"
-          >
-            仅未读
-          </button>
-        </template>
-        
-        <template #content="{ emails, selectedId, batchMode, selectedIds, toggleSelection, onSelect }">
-          <EmailItem
-            v-for="email in emails"
-            :key="email.id"
-            :email="email"
-            :isSelected="selectedId === email.id"
-            :isChecked="(selectedIds?.value || []).includes(email.id)"
-            :batchMode="batchMode"
-            @click="onSelect(email)"
-            @toggle="toggleSelection(email.id)"
-            @delete="handleDeleteEmail(email.id)"
-            @copy-code="copyVerificationCode"
-          />
-        </template>
-        
-        <template #pagination>
-          <Pagination
-            :current-page="mailStore.currentPage"
-            :total-pages="mailStore.totalPages"
-            :total="mailStore.totalEmails"
-            @page-change="handlePageChange"
-          />
-        </template>
+            <EmailItem
+              v-for="email in emails"
+              :key="email.id"
+              :email="email"
+              :isSelected="selectedId === email.id"
+              :isChecked="(selectedIds?.value || []).includes(email.id)"
+              :batchMode="batchMode"
+              @click="onSelect(email)"
+              @toggle="toggleSelection(email.id)"
+              @delete="handleDeleteEmail(email.id)"
+              @copy-code="copyVerificationCode"
+            />
+          </template>
+
+          <template #pagination>
+            <Pagination
+              :current-page="mailStore.currentPage"
+              :total-pages="mailStore.totalPages"
+              :total="mailStore.totalEmails"
+              @page-change="handlePageChange"
+            />
+          </template>
         </EmailList>
       </div>
 
@@ -230,29 +269,38 @@
               查看全部
             </button>
           </template>
-          
+
           <template #actions>
             <button
               v-if="canShowExternalFetchButton"
-              @click="selectedExternalMailboxId ? fetchExternalMailboxEmails() : fetchAllExternalEmails()"
+              @click="
+                selectedExternalMailboxId ? fetchExternalMailboxEmails() : fetchAllExternalEmails()
+              "
               :disabled="fetchingExternalEmails"
               class="px-3 py-1.5 text-xs bg-primary-600 text-white rounded hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
             >
-              <svg 
+              <svg
                 v-if="fetchingExternalEmails"
-                class="w-3 h-3 animate-spin" 
-                fill="none" 
-                stroke="currentColor" 
+                class="w-3 h-3 animate-spin"
+                fill="none"
+                stroke="currentColor"
                 viewBox="0 0 24 24"
               >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
               </svg>
               <span>{{ fetchingExternalEmails ? '收取中...' : '收取全部' }}</span>
             </button>
           </template>
-          
+
           <!-- 完全复用EmailItem组件 -->
-          <template #content="{ emails, selectedId, batchMode, selectedIds, toggleSelection, onSelect }">
+          <template
+            #content="{ emails, selectedId, batchMode, selectedIds, toggleSelection, onSelect }"
+          >
             <EmailItem
               v-for="email in emails"
               :key="email.id"
@@ -266,7 +314,7 @@
               @copy-code="copyVerificationCode"
             />
           </template>
-          
+
           <template #pagination>
             <Pagination
               :current-page="externalEmailPage"
@@ -285,14 +333,13 @@
     </template>
 
     <template #main v-if="currentView === 'send-email'">
-      <SendEmailPanel 
-        ref="sendEmailPanelRef"
-        :selected-mailbox-ids="selectedExternalMailboxIds"
-      />
+      <SendEmailPanel ref="sendEmailPanelRef" :selected-mailbox-ids="selectedExternalMailboxIds" />
     </template>
 
     <template #footer v-if="!userStore.isAuthenticated">
-      <div class="flex flex-col gap-2 text-xs text-gray-500 sm:flex-row sm:items-center sm:justify-between">
+      <div
+        class="flex flex-col gap-2 text-xs text-gray-500 sm:flex-row sm:items-center sm:justify-between"
+      >
         <div>服务名称：肥猫猫邮箱服务</div>
         <div class="flex items-center gap-3">
           <a href="/privacy-policy" class="hover:text-primary-600">隐私权政策</a>
@@ -304,19 +351,35 @@
   </ThreeColumnLayout>
 
   <!-- Web端小程序二维码 -->
-  <div v-if="!isTauri() && showQrPromo" class="fixed right-2 xl:right-1 top-1/2 -translate-y-1/2 bg-white rounded-xl shadow-lg border border-gray-100 p-3 z-30 flex flex-col items-center">
-    <button @click="showQrPromo = false" class="absolute top-1 right-1.5 text-gray-400 hover:text-gray-600 text-base leading-none">&times;</button>
+  <div
+    v-if="!isTauri() && showQrPromo"
+    class="fixed right-2 xl:right-1 top-1/2 -translate-y-1/2 bg-white rounded-xl shadow-lg border border-gray-100 p-3 z-30 flex flex-col items-center"
+  >
+    <button
+      @click="showQrPromo = false"
+      class="absolute top-1 right-1.5 text-gray-400 hover:text-gray-600 text-base leading-none"
+    >
+      &times;
+    </button>
     <img :src="wxProgramImg" class="w-20 h-20 rounded-lg" alt="小程序二维码" />
     <p class="text-[11px] text-gray-500 mt-1.5">扫码使用小程序版</p>
   </div>
-  
+
   <!-- 邮件内容弹窗 -->
+  <div
+    v-if="showRefreshTooltip && !refreshingSystemEmails"
+    class="pointer-events-none fixed z-[9999] whitespace-nowrap rounded bg-gray-800 px-2 py-1 text-xs text-white shadow-sm"
+    :style="refreshTooltipStyle"
+  >
+    立即刷新
+  </div>
+
   <EmailContentModal
     :visible="showEmailModal"
     :email="modalEmail"
     @update:visible="showEmailModal = $event"
   />
-  
+
   <!-- 删除确认弹窗 -->
   <ConfirmDialog
     :visible="showDeleteConfirm"
@@ -370,7 +433,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useUserStore } from '@/stores/user'
 import { useMailboxStore } from '@/stores/auth'
 import { useMailStore } from '@/stores/mail'
@@ -390,11 +453,16 @@ import { mailboxAPI } from '@/api/mailbox'
 import EmailDetail from '@/components/Mail/EmailDetail/EmailDetail.vue'
 import EmailContentModal from '@/components/Mail/EmailContentModal.vue'
 import Pagination from '@/components/Pagination/index.vue'
-import ActionButton from '@/components/ActionButton/index.vue'
+import BaseIcon from '@/components/BaseIcon/index.vue'
 import ConfirmDialog from '@/components/ConfirmDialog/index.vue'
 import { useAutoRefresh } from '@/composables/useAutoRefresh'
 import { showMessage } from '@/utils/message'
 import { isTauri, getServerUrl } from '@/services/api'
+import { runDesktopOAuthMailboxAction } from '@/services/desktopOAuthMailbox'
+import { DESKTOP_DOWNLOAD_URLS } from '@/config/desktopRelease'
+import { normalizeOAuthRecoveryErrorMessage } from '@/utils/oauthRecovery'
+import { runPromisePool } from '@/utils/promisePool'
+import { canDesktopSmtpSend, normalizeSmtpEmail } from '@/utils/smtpCapability'
 import wxProgramImg from '@/assets/img/wx_program.jpg'
 
 // 获取 Tauri invoke（按需加载，避免竞态）
@@ -410,10 +478,29 @@ async function getTauriInvoke() {
 import { unifiedAPI } from '@/api/unified'
 import { emailAPI } from '@/api/email'
 
+const OAUTH2_DOMAINS: Record<string, string> = {
+  'gmail.com': 'google',
+  'googlemail.com': 'google',
+  'outlook.com': 'microsoft',
+  'hotmail.com': 'microsoft',
+  'live.com': 'microsoft',
+  'live.cn': 'microsoft',
+  'msn.com': 'microsoft'
+}
+
+const resolveOAuthProviderByEmail = (email: string, fallback = '') => {
+  const normalizedFallback = String(fallback || '').toLowerCase()
+  if (normalizedFallback === 'google' || normalizedFallback === 'microsoft') {
+    return normalizedFallback
+  }
+
+  const domain = (email.split('@')[1] || '').toLowerCase()
+  return OAUTH2_DOMAINS[domain] || ''
+}
+
 const userStore = useUserStore()
 const mailboxStore = useMailboxStore()
 const mailStore = useMailStore()
-
 
 const systemMailboxListRef = ref()
 const externalMailboxListRef = ref()
@@ -424,11 +511,15 @@ const currentView = ref<'emails' | 'send-email'>('emails')
 const selectedMailboxId = ref<number | null>(null)
 const externalInitialFetched = ref(false)
 const showOnlyUnread = ref(false)
+const refreshingSystemEmails = ref(false)
+const refreshButtonRef = ref<HTMLElement | null>(null)
+const showRefreshTooltip = ref(false)
+const refreshTooltipStyle = ref<Record<string, string>>({})
 const showEmailModal = ref(false)
 const modalEmail = ref<any>(null)
 const showBatchAddModal = ref(false)
 const batchAddModalRef = ref<any>(null)
-const pendingOAuthAccounts = ref<Array<{ email: string, provider: string }>>([])
+const pendingOAuthAccounts = ref<Array<{ email: string; provider: string }>>([])
 const showDownloadDialog = ref(false)
 const downloadDialogTitle = ref('需要桌面端')
 const downloadDialogMessage = ref('第三方邮箱仅支持桌面端添加和收取，是否下载桌面客户端？')
@@ -448,12 +539,12 @@ const openDownloadDesktop = () => {
   const isWindows = /Win/i.test(`${platform} ${userAgent}`)
 
   if (isMac) {
-    globalThis.location.href = 'https://zjkdongao.cn/downloads/mail-desktop_2.11.0_universal.dmg'
+    globalThis.location.href = DESKTOP_DOWNLOAD_URLS.macos
     return
   }
 
   if (isWindows) {
-    globalThis.location.href = 'https://zjkdongao.cn/downloads/mail-desktop_2.11.0_x64-setup.exe'
+    globalThis.location.href = DESKTOP_DOWNLOAD_URLS.windows
     return
   }
 
@@ -479,7 +570,6 @@ const showSendEmailModal = ref(false)
 const externalMailboxList = ref<any[]>([])
 const smtpAccounts = ref<any[]>([])
 
-
 // 外部邮箱相关状态
 const selectedExternalMailboxId = ref<number | null>(null)
 const selectedExternalMailboxIds = ref<number[]>([])
@@ -493,6 +583,11 @@ const externalEmailPage = ref(1)
 const externalEmailPageSize = ref(20)
 const externalEmailTotal = ref(0)
 const externalMailboxAuthTypeMap = ref<Record<number, string>>({})
+const externalMailboxFetchingIds = ref<number[]>([])
+const EXTERNAL_FETCH_ALL_CONCURRENCY = Math.max(
+  2,
+  Math.min(8, Number(globalThis.navigator?.hardwareConcurrency || 8))
+)
 
 const canShowExternalFetchButton = computed(() => {
   // 只有桌面端才显示收取按钮（Web 端所有用户共用服务器 IP 连 IMAP，量大会被风控）
@@ -509,6 +604,115 @@ const syncMailboxAuthTypeMap = (items: any[]) => {
   }
 }
 
+const setExternalMailboxFetchingIds = (ids: number[]) => {
+  externalMailboxFetchingIds.value = Array.from(
+    new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))
+  )
+}
+
+const clearExternalMailboxFetchingIds = () => {
+  externalMailboxFetchingIds.value = []
+}
+
+const removeExternalMailboxFetchingIds = (ids: number[]) => {
+  const removing = new Set(
+    ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0)
+  )
+  externalMailboxFetchingIds.value = externalMailboxFetchingIds.value.filter(
+    (id) => !removing.has(id)
+  )
+}
+
+const markRecoveredMailboxAsPassword = (mailboxId: number) => {
+  externalMailboxAuthTypeMap.value[mailboxId] = 'password'
+  if (selectedExternalMailboxId.value === mailboxId) {
+    selectedExternalAuthType.value = 'password'
+  }
+  window.dispatchEvent(
+    new CustomEvent('external-mailbox-recovered', {
+      detail: { mailboxId }
+    })
+  )
+}
+
+const loadExternalMailboxAccountById = async (mailboxId: number) => {
+  const response: any = await batchLoginAPI.getAllAccounts(100, {
+    suppressErrorMessage: true
+  })
+  if (response.code !== 0) {
+    throw new Error(response.message || '获取邮箱信息失败')
+  }
+  const accounts = response.data?.accounts || []
+  return accounts.find((item: any) => Number(item?.id) === Number(mailboxId)) || null
+}
+
+const openOAuthReauthorizeModal = async (account: any) => {
+  const provider = resolveOAuthProviderByEmail(account?.email || '', account?.oauth_provider || account?.provider || '')
+  if (!provider) {
+    throw new Error('当前邮箱不支持 OAuth 重新授权')
+  }
+
+  pendingOAuthAccounts.value = [{ email: account.email, provider }]
+  showBatchAddModal.value = true
+  await nextTick()
+  batchAddModalRef.value?.clearResults?.()
+  batchAddModalRef.value?.addOAuthAccounts?.(pendingOAuthAccounts.value)
+  await nextTick()
+  await batchAddModalRef.value?.startOAuthAuthorization?.()
+}
+
+const fetchOAuthMailboxOnceById = async (
+  tauriInvoke: any,
+  mailboxId: number,
+  options: { account?: any; allowInteractiveReauth?: boolean } = {}
+) => {
+  const token = localStorage.getItem('token') || ''
+  const serverUrl = getServerUrl()
+  const account = options.account || (await loadExternalMailboxAccountById(mailboxId))
+
+  try {
+    const fetchResult = await runDesktopOAuthMailboxAction(mailboxId, async (tokenPayload) => {
+      return tauriInvoke('fetch_emails', {
+        mailboxId,
+        email: tokenPayload.email,
+        password: '',
+        protocol: 'imap',
+        host: tokenPayload.imap_host,
+        port: tokenPayload.imap_port,
+        token,
+        serverUrl,
+        authType: 'oauth2',
+        accessToken: tokenPayload.access_token
+      })
+    })
+
+    await batchLoginAPI.updateMailboxStatus(mailboxId, 'active')
+    return Number(fetchResult?.count || 0)
+  } catch (error: any) {
+    if (!account) {
+      throw error
+    }
+
+    if (String(account?.password || '').trim()) {
+      const recoverResult = await tauriInvoke('recover_and_fetch_external_mailbox', {
+        mailboxId,
+        token,
+        serverUrl
+      })
+      markRecoveredMailboxAsPassword(mailboxId)
+      await batchLoginAPI.updateMailboxStatus(mailboxId, 'active')
+      return Number(recoverResult?.count || 0)
+    }
+
+    if (options.allowInteractiveReauth) {
+      await openOAuthReauthorizeModal(account)
+      throw new Error('__oauth_reauthorizing__')
+    }
+
+    throw error
+  }
+}
+
 const loadExternalMailboxAuthTypes = async () => {
   try {
     externalMailboxAuthTypeMap.value = {}
@@ -522,7 +726,7 @@ const loadExternalMailboxAuthTypes = async () => {
       if (response.code !== 0) break
 
       const data = response.data || {}
-      const list = Array.isArray(data) ? data : (data.accounts || [])
+      const list = Array.isArray(data) ? data : data.accounts || []
       syncMailboxAuthTypeMap(list)
 
       if (!Array.isArray(data) && data.pagination) {
@@ -564,6 +768,12 @@ const externalSelectedEmail = ref<any>(null)
 // 批量模式互斥：邮箱批量开启时，关闭邮件批量
 const handleMailboxBatchStart = () => {
   console.log('🔵 邮箱批量模式开启，关闭邮件批量模式')
+  if (systemMailboxListRef.value?.cancelBatchMode) {
+    systemMailboxListRef.value.cancelBatchMode()
+  }
+  if (externalMailboxListRef.value?.cancelBatchMode) {
+    externalMailboxListRef.value.cancelBatchMode()
+  }
   // 关闭系统邮件列表的批量模式
   if (systemEmailListRef.value?.cancelBatchMode) {
     systemEmailListRef.value.cancelBatchMode()
@@ -583,11 +793,11 @@ const switchMailboxType = (type: 'system' | 'external') => {
   } else {
     externalSelectedEmail.value = mailStore.selectedEmail
   }
-  
+
   // 切换类型
   mailboxType.value = type
   saveMailboxType(type)
-  
+
   // 恢复目标Tab的选中邮件
   if (type === 'system') {
     mailStore.selectedEmail = systemSelectedEmail.value
@@ -604,14 +814,14 @@ const switchMailboxType = (type: 'system' | 'external') => {
     if (!externalAutoFetch.isRunning.value) {
       externalAutoFetch.start()
     }
-    
+
     // 加载外部邮箱列表
     if (externalMailboxListRef.value?.loadAccounts) {
       externalMailboxListRef.value.loadAccounts()
     }
     loadExternalMailboxAuthTypes()
     loadSmtpAccounts()
-    
+
     // 加载所有外部邮件
     loadAllExternalEmails()
 
@@ -661,7 +871,7 @@ const handleOAuth2Login = async (provider: string) => {
 const handleShareMailboxes = (mailboxes: any[]) => {
   console.log('🔵 首页 - 处理分享邮箱', mailboxes)
   shareMailboxes.value = mailboxes
-  shareMailboxIds.value = mailboxes.map(m => m.id)
+  shareMailboxIds.value = mailboxes.map((m) => m.id)
   showShareModal.value = true
 }
 
@@ -725,17 +935,6 @@ const handleEmailSent = () => {
 const handleBatchAddAccounts = async (accounts: any[]) => {
   batchLoginLoading.value = true
 
-  // OAuth2 需要授权的邮箱后缀
-  const OAUTH2_DOMAINS: Record<string, string> = {
-    'gmail.com': 'google',
-    'googlemail.com': 'google',
-    'outlook.com': 'microsoft',
-    'hotmail.com': 'microsoft',
-    'live.com': 'microsoft',
-    'live.cn': 'microsoft',
-    'msn.com': 'microsoft',
-  }
-
   // 初始化结果列表（全部邮箱）
   if (batchAddModalRef.value) {
     batchAddModalRef.value.initResults(accounts.map((a: any) => a.email))
@@ -754,13 +953,18 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
 
     const isAlreadyAddedMessage = (message: string) => {
       const text = (message || '').toLowerCase()
-      return text.includes('已添加过') || text.includes('无需重复添加') || text.includes('already added') || text.includes('already exists')
+      return (
+        text.includes('已添加过') ||
+        text.includes('无需重复添加') ||
+        text.includes('already added') ||
+        text.includes('already exists')
+      )
     }
 
     const resolveErrorMessage = (error: any) =>
-      error?.response?.data?.message ||
-      error?.message ||
-      String(error || '')
+      normalizeOAuthRecoveryErrorMessage(
+        error?.response?.data?.message || error?.message || String(error || '')
+      )
 
     const fetchNewMailboxOnce = async (tauriInvoke: any, mailboxId: number, accountData: any) => {
       const host = accountData.protocol === 'imap' ? accountData.imap_host : accountData.pop3_host
@@ -799,7 +1003,9 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
 
     // ========== OAuth Token 批量导入（4段格式：邮箱----密码----Client_ID----Refresh_Token） ==========
     const tokenAccounts = accounts.filter((a: any) => a.oauth_refresh_token && a.oauth_client_id)
-    const normalAccounts = accounts.filter((a: any) => !(a.oauth_refresh_token && a.oauth_client_id))
+    const normalAccounts = accounts.filter(
+      (a: any) => !(a.oauth_refresh_token && a.oauth_client_id)
+    )
 
     if (tokenAccounts.length > 0) {
       try {
@@ -813,19 +1019,52 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
           return {
             email: a.email,
             provider,
+            password: a.password,
             refresh_token: a.oauth_refresh_token,
-            client_id: a.oauth_client_id,
+            client_id: a.oauth_client_id
           }
         })
 
         const res = await batchLoginAPI.batchImportOAuth2(importItems)
         const importResults = res.data?.results || res.results || []
+        const tauriInvoke = isTauri() ? await getTauriInvoke() : null
 
         for (const r of importResults) {
           if (r.success) {
             successCount++
+            let fetchStatus = ''
+            const mailboxId = Number(r.mailbox_id || 0)
+
+            if (tauriInvoke && mailboxId > 0) {
+              try {
+                setExternalMailboxFetchingIds([mailboxId])
+                const importedAccount =
+                  tokenAccounts.find(
+                    (item: any) => String(item.email || '').toLowerCase() === String(r.email || '').toLowerCase()
+                  ) || null
+                const newCount = await fetchOAuthMailboxOnceById(tauriInvoke, mailboxId, {
+                  account: importedAccount
+                })
+                fetchStatus = `，首次收取完成（新增 ${newCount} 封）`
+              } catch (fetchError: any) {
+                const fetchErrorMessage = resolveErrorMessage(fetchError)
+                try {
+                  await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', fetchErrorMessage)
+                } catch (statusError) {
+                  console.error('更新 OAuth 邮箱收取状态失败:', statusError)
+                }
+                fetchStatus = '，首次收取失败'
+              } finally {
+                clearExternalMailboxFetchingIds()
+              }
+            }
+
             if (batchAddModalRef.value) {
-              batchAddModalRef.value.updateResult(r.email, 'success', 'OAuth Token 导入成功')
+              batchAddModalRef.value.updateResult(
+                r.email,
+                'success',
+                `OAuth Token 导入成功${fetchStatus}`
+              )
             }
           } else {
             failCount++
@@ -856,7 +1095,7 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
         const accountData: any = {
           email: account.email,
           password: account.password,
-          protocol: account.protocol || 'imap'  // Gmail/Outlook 默认用 imap
+          protocol: account.protocol || 'imap' // Gmail/Outlook 默认用 imap
         }
 
         // 如果有自定义POP3配置
@@ -926,14 +1165,18 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
                     smtp_host: result.smtp_host,
                     smtp_port: result.smtp_port
                   })
-                } catch (error) {
-                }
+                } catch (error) {}
               }
 
               try {
                 const smtpAccountsResponse = await smtpAccountsAPI.getAccounts()
-                const smtpAccounts = smtpAccountsResponse.code === 0 ? (smtpAccountsResponse.data?.accounts || []) : []
-                canSend = smtpAccounts.some((item: any) => item.email === accountData.email && item.status === 'active')
+                const smtpAccounts =
+                  smtpAccountsResponse.code === 0 ? smtpAccountsResponse.data?.accounts || [] : []
+                canSend = smtpAccounts.some(
+                  (item: any) =>
+                    normalizeSmtpEmail(item?.email) === normalizeSmtpEmail(accountData.email) &&
+                    canDesktopSmtpSend(item)
+                )
               } catch (error) {
                 canSend = false
               }
@@ -957,7 +1200,11 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
               }
 
               if (batchAddModalRef.value) {
-                batchAddModalRef.value.updateResult(account.email, 'success', `本地验证成功（${smtpStatus}）${fetchStatus}`)
+                batchAddModalRef.value.updateResult(
+                  account.email,
+                  'success',
+                  `本地验证成功（${smtpStatus}）${fetchStatus}`
+                )
               }
             } else {
               const responseMessage = response.message || ''
@@ -980,13 +1227,21 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
               } else {
                 enqueueOAuthPending(account.email, oauthProvider)
                 if (batchAddModalRef.value) {
-                  batchAddModalRef.value.updateResult(account.email, 'error', '密码登录失败，需要OAuth2授权')
+                  batchAddModalRef.value.updateResult(
+                    account.email,
+                    'error',
+                    '密码登录失败，需要OAuth2授权'
+                  )
                 }
               }
             } else {
               failCount++
               if (batchAddModalRef.value) {
-                batchAddModalRef.value.updateResult(account.email, 'error', resolveErrorMessage(error))
+                batchAddModalRef.value.updateResult(
+                  account.email,
+                  'error',
+                  resolveErrorMessage(error)
+                )
               }
             }
           }
@@ -1002,7 +1257,11 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
               if (response.code === 0) {
                 successCount++
                 if (batchAddModalRef.value) {
-                  batchAddModalRef.value.updateResult(account.email, 'success', '密码登录成功（无需OAuth2）')
+                  batchAddModalRef.value.updateResult(
+                    account.email,
+                    'success',
+                    '密码登录成功（无需OAuth2）'
+                  )
                 }
               } else if (isAlreadyAddedMessage(response.message || '')) {
                 markNoNeedOAuth(account.email)
@@ -1043,7 +1302,11 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
           } else {
             enqueueOAuthPending(account.email, oauthProvider)
             if (batchAddModalRef.value) {
-              batchAddModalRef.value.updateResult(account.email, 'error', '密码登录失败，需要OAuth2授权')
+              batchAddModalRef.value.updateResult(
+                account.email,
+                'error',
+                '密码登录失败，需要OAuth2授权'
+              )
             }
           }
         } else {
@@ -1064,9 +1327,9 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
 
     // 显示结果
     if (successCount > 0) {
-      showMessage(`密码登录成功 ${successCount} 个邮箱`, 'success')
+      showMessage(`添加成功 ${successCount} 个邮箱`, 'success')
     }
-    
+
     // 如果有普通邮箱需要桌面端，提示下载
     if (needDesktopDownload) {
       openDesktopDownloadDialog('普通邮箱需要桌面端添加和收取，是否下载桌面客户端？')
@@ -1098,7 +1361,7 @@ const handleBatchAddAccounts = async (accounts: any[]) => {
 }
 
 // OAuth2 授权完成的回调
-const handleOAuth2Complete = async (result: { successCount: number, failCount: number }) => {
+const handleOAuth2Complete = async (result: { successCount: number; failCount: number }) => {
   showBatchAddModal.value = false
   pendingOAuthAccounts.value = []
 
@@ -1124,6 +1387,12 @@ const handleOAuth2Complete = async (result: { successCount: number, failCount: n
 // 批量模式互斥：邮件批量开启时，关闭邮箱批量
 const handleEmailBatchStart = () => {
   console.log('🔵 邮件批量模式开启，关闭邮箱批量模式')
+  if (systemEmailListRef.value?.cancelBatchMode) {
+    systemEmailListRef.value.cancelBatchMode()
+  }
+  if (externalEmailListRef.value?.cancelBatchMode) {
+    externalEmailListRef.value.cancelBatchMode()
+  }
   // 关闭系统邮箱列表的批量模式
   if (systemMailboxListRef.value?.cancelBatchMode) {
     systemMailboxListRef.value.cancelBatchMode()
@@ -1134,42 +1403,94 @@ const handleEmailBatchStart = () => {
   }
 }
 
-// 自动刷新（10秒）- 只在系统邮箱Tab时才刷新
-const autoRefresh = useAutoRefresh(async () => {
-  // 只在系统邮箱Tab才自动刷新
-  if (mailboxType.value !== 'system') {
+const SYSTEM_EMAIL_REFRESH_INTERVAL = 10
+const MANUAL_REFRESH_MIN_SPIN_MS = 1200
+
+const refreshSystemEmails = async (options?: { minSpinMs?: number }) => {
+  if (refreshingSystemEmails.value) {
     return
   }
 
-  // 登录用户
-  if (userStore.isAuthenticated) {
-    const params: any = {
-      page: mailStore.currentPage,
-      page_size: 20,
-      ...(showOnlyUnread.value ? { unread: true } : {})
+  refreshingSystemEmails.value = true
+  const refreshStartedAt = Date.now()
+
+  try {
+    if (mailboxType.value !== 'system') {
+      return
     }
-    // 保持搜索关键词
-    if (mailStore.searchKeyword) params.search = mailStore.searchKeyword
-    if (selectedMailboxId.value) {
-      await mailStore.fetchMailboxEmails(selectedMailboxId.value, params, true)
-    } else {
-      await mailStore.fetchUserEmails(mailStore.currentPage, 20, true, showOnlyUnread.value || undefined, mailStore.searchKeyword || undefined)
-    }
-  } else if (mailboxStore.tempMailbox?.id) {
-    // 临时用户：用临时邮箱接口刷新
-    try {
-      const res = await mailboxAPI.getTempMailboxEmails(mailboxStore.tempMailbox.id)
-      if (res.code === 0 && res.data) {
-        mailStore.emails = res.data.emails || []
+
+    // 登录用户
+    if (userStore.isAuthenticated) {
+      const params: any = {
+        page: mailStore.currentPage,
+        page_size: 20,
+        ...(showOnlyUnread.value ? { unread: true } : {})
       }
-    } catch (e) {
-      // 静默失败
+      // 保持搜索关键词
+      if (mailStore.searchKeyword) params.search = mailStore.searchKeyword
+      if (selectedMailboxId.value) {
+        await mailStore.fetchMailboxEmails(selectedMailboxId.value, params, true)
+      } else {
+        await mailStore.fetchUserEmails(
+          mailStore.currentPage,
+          20,
+          true,
+          showOnlyUnread.value || undefined,
+          mailStore.searchKeyword || undefined
+        )
+      }
+    } else if (mailboxStore.tempMailbox?.id) {
+      // 临时用户：用临时邮箱接口刷新
+      try {
+        const res = await mailboxAPI.getTempMailboxEmails(mailboxStore.tempMailbox.id)
+        if (res.code === 0 && res.data) {
+          mailStore.emails = res.data.emails || []
+        }
+      } catch (e) {
+        // 静默失败
+      }
     }
+
+    // 刷新邮箱标签（可能有新邮件触发了新站点识别）
+    systemMailboxListRef.value?.loadTagsData?.()
+  } finally {
+    const minSpinMs = options?.minSpinMs || 0
+    const elapsed = Date.now() - refreshStartedAt
+    if (elapsed < minSpinMs) {
+      await new Promise((resolve) => setTimeout(resolve, minSpinMs - elapsed))
+    }
+    refreshingSystemEmails.value = false
+  }
+}
+
+const handleImmediateRefreshSystemEmails = async () => {
+  hideRefreshTooltip()
+  autoRefresh.restart()
+  await refreshSystemEmails({ minSpinMs: MANUAL_REFRESH_MIN_SPIN_MS })
+}
+
+const showRefreshTooltipPopover = () => {
+  if (refreshingSystemEmails.value || !refreshButtonRef.value) {
+    return
   }
 
-  // 刷新邮箱标签（可能有新邮件触发了新站点识别）
-  systemMailboxListRef.value?.loadTagsData?.()
-}, 10)
+  const rect = refreshButtonRef.value.getBoundingClientRect()
+  refreshTooltipStyle.value = {
+    left: `${rect.left + rect.width / 2}px`,
+    top: `${rect.top - 8}px`,
+    transform: 'translate(-50%, -100%)'
+  }
+  showRefreshTooltip.value = true
+}
+
+const hideRefreshTooltip = () => {
+  showRefreshTooltip.value = false
+}
+
+// 自动刷新（10秒）- 只在系统邮箱Tab时才刷新
+const autoRefresh = useAutoRefresh(async () => {
+  await refreshSystemEmails()
+}, SYSTEM_EMAIL_REFRESH_INTERVAL)
 
 // 第三方邮箱自动收取（10分钟）
 const externalAutoFetch = useAutoRefresh(async () => {
@@ -1185,6 +1506,8 @@ const externalAutoFetch = useAutoRefresh(async () => {
 
 // 页面加载时获取数据并启动自动刷新
 onMounted(async () => {
+  window.addEventListener('external-mailbox-recovered', handleRecoveredMailboxEvent as EventListener)
+
   if (userStore.isAuthenticated) {
     // 加载邮箱列表
     await mailboxStore.fetchMailboxes()
@@ -1221,6 +1544,10 @@ onMounted(async () => {
   }
 })
 
+onBeforeUnmount(() => {
+  window.removeEventListener('external-mailbox-recovered', handleRecoveredMailboxEvent as EventListener)
+})
+
 // 申请免费邮箱
 const allocateMailbox = async () => {
   const result = await mailboxStore.allocateMailbox()
@@ -1228,7 +1555,10 @@ const allocateMailbox = async () => {
     // 刷新用户信息以更新剩余邮箱数量
     await userStore.updateUserProfile()
   }
-  showMessage(result.success ? '邮箱申请成功' : result.error || '申请失败', result.success ? 'success' : 'error')
+  showMessage(
+    result.success ? '邮箱申请成功' : result.error || '申请失败',
+    result.success ? 'success' : 'error'
+  )
 }
 
 // 选择系统邮箱
@@ -1255,9 +1585,10 @@ const handleSelectExternalMailbox = async (account: any) => {
       selectedExternalMailboxIds.value.push(account.id)
     }
     // 同步更新单选 ID（用于左侧高亮等）
-    selectedExternalMailboxId.value = selectedExternalMailboxIds.value.length > 0
-      ? selectedExternalMailboxIds.value[selectedExternalMailboxIds.value.length - 1]
-      : null
+    selectedExternalMailboxId.value =
+      selectedExternalMailboxIds.value.length > 0
+        ? selectedExternalMailboxIds.value[selectedExternalMailboxIds.value.length - 1]
+        : null
     return
   }
   selectedExternalMailboxId.value = account.id
@@ -1271,6 +1602,24 @@ const handleSelectExternalMailbox = async (account: any) => {
   mailStore.selectedEmail = null
   await loadExternalMailboxEmails()
   externalEmailListRef.value?.scrollToTop?.()
+}
+
+const handleRecoveredMailboxEvent = (event: Event) => {
+  const customEvent = event as CustomEvent<{ mailboxId?: number }>
+  const mailboxId = Number(customEvent?.detail?.mailboxId || 0)
+  if (!mailboxId) return
+  externalMailboxAuthTypeMap.value[mailboxId] = 'password'
+  if (selectedExternalMailboxId.value === mailboxId) {
+    selectedExternalAuthType.value = 'password'
+  }
+}
+
+const handleOAuthMailboxReauthorize = async (account: any) => {
+  try {
+    await openOAuthReauthorizeModal(account)
+  } catch (error: any) {
+    showMessage(error?.message || '打开重新授权窗口失败', 'error')
+  }
 }
 
 // 移除 SendEmailPanel 中的账号
@@ -1289,18 +1638,18 @@ const handleRemoveAccountFromPanel = (id: number) => {
 // 加载外部邮箱邮件列表（带分页）
 const loadExternalMailboxEmails = async () => {
   if (!selectedExternalMailboxId.value) return
-  
+
   try {
     const response = await batchLoginAPI.getExternalEmails(
-      externalEmailPage.value, 
+      externalEmailPage.value,
       externalEmailPageSize.value,
       selectedExternalMailboxId.value
     )
-    
+
     if (response.code === 0 && response.data) {
       externalEmails.value = response.data.emails || []
       externalEmailTotal.value = response.data.pagination?.total || 0
-      
+
       // 空列表不弹 toast，避免和邮箱收取失败的红色错误同时出现造成误导
     } else {
       const msg = response.message || '加载邮件失败'
@@ -1325,7 +1674,7 @@ const loadExternalMailboxEmails = async () => {
 // 外部邮件分页切换
 const handleExternalEmailPageChange = async (page: number) => {
   externalEmailPage.value = page
-  
+
   // 根据是否选中邮箱决定加载方式
   if (selectedExternalMailboxId.value) {
     await loadExternalMailboxEmails()
@@ -1345,8 +1694,11 @@ const fetchExternalMailboxEmails = async () => {
       return
     }
 
+    showMessage('正在收取邮件...', 'primary', 0)
+
     // 桌面端：统一走本地 Tauri 收取；OAuth2 只向后端拿 token
     const mailboxId = selectedExternalMailboxId.value
+    setExternalMailboxFetchingIds([mailboxId])
 
     if (selectedExternalAuthType.value === 'oauth2') {
       // OAuth2 邮箱：先获取 token，再走本地 IMAP XOAUTH2
@@ -1356,37 +1708,19 @@ const fetchExternalMailboxEmails = async () => {
         return
       }
 
-      const tokenRes = await batchLoginAPI.getOAuth2AccessToken(mailboxId)
-      if (tokenRes.code !== 0) {
-        const rawMsg = tokenRes.message || '获取 token 失败'
-        await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', rawMsg)
-        showMessage('收取失败: ' + rawMsg, 'error')
-        if (externalMailboxListRef.value?.loadAccounts) {
-          externalMailboxListRef.value.loadAccounts()
-        }
-        return
-      }
-
-      const { access_token: oauthAccessToken, imap_host, imap_port, email: oauthEmail } = tokenRes.data
-      const token = localStorage.getItem('token') || ''
-      const serverUrl = getServerUrl()
-
       try {
-        await tauriInvoke('fetch_emails', {
-          mailboxId,
-          email: oauthEmail,
-          password: '',
-          protocol: 'imap',
-          host: imap_host,
-          port: imap_port,
-          token,
-          serverUrl,
-          authType: 'oauth2',
-          accessToken: oauthAccessToken,
+        const account = await loadExternalMailboxAccountById(mailboxId)
+        await fetchOAuthMailboxOnceById(tauriInvoke, mailboxId, {
+          account,
+          allowInteractiveReauth: true
         })
-        await batchLoginAPI.updateMailboxStatus(mailboxId, 'active')
       } catch (e: any) {
-        const rawMsg = typeof e === 'string' ? e : (e?.message || '收取失败')
+        const rawMsg = normalizeOAuthRecoveryErrorMessage(
+          typeof e === 'string' ? e : e?.message || '收取失败'
+        )
+        if (rawMsg === '__oauth_reauthorizing__') {
+          return
+        }
         await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', rawMsg)
         showMessage('收取失败: ' + rawMsg, 'error')
         if (externalMailboxListRef.value?.loadAccounts) {
@@ -1404,7 +1738,7 @@ const fetchExternalMailboxEmails = async () => {
 
       // 获取选中邮箱的详细信息
       const res = await batchLoginAPI.getAccounts(1, 100)
-      const accountList = res.code === 0 ? (res.data?.accounts || []) : []
+      const accountList = res.code === 0 ? res.data?.accounts || [] : []
       const account = accountList.find((a: any) => a.id === mailboxId)
       if (!account) {
         showMessage('未找到该邮箱信息', 'error')
@@ -1429,7 +1763,7 @@ const fetchExternalMailboxEmails = async () => {
         })
         await batchLoginAPI.updateMailboxStatus(mailboxId, 'active')
       } catch (e: any) {
-        const rawMsg = typeof e === 'string' ? e : (e?.message || '收取失败')
+        const rawMsg = typeof e === 'string' ? e : e?.message || '收取失败'
         await batchLoginAPI.updateMailboxStatus(mailboxId, 'failed', rawMsg)
         showMessage('收取失败: ' + rawMsg, 'error')
         if (externalMailboxListRef.value?.loadAccounts) {
@@ -1440,7 +1774,7 @@ const fetchExternalMailboxEmails = async () => {
     }
 
     // 收取成功，刷新列表
-    await new Promise(resolve => setTimeout(resolve, 500))
+    await new Promise((resolve) => setTimeout(resolve, 500))
     externalEmailPage.value = 1
     await loadExternalMailboxEmails()
     showMessage(`收取成功，共 ${externalEmails.value.length} 封邮件`, 'success')
@@ -1457,6 +1791,7 @@ const fetchExternalMailboxEmails = async () => {
     }
   } finally {
     fetchingExternalEmails.value = false
+    clearExternalMailboxFetchingIds()
   }
 }
 
@@ -1500,11 +1835,11 @@ const toggleExternalUnread = () => {
 const loadAllExternalEmails = async () => {
   try {
     const response = await batchLoginAPI.getExternalEmails(
-      externalEmailPage.value, 
+      externalEmailPage.value,
       externalEmailPageSize.value,
-      null  // 不传 mailboxId，获取所有外部邮件
+      null // 不传 mailboxId，获取所有外部邮件
     )
-    
+
     if (response.code === 0 && response.data) {
       externalEmails.value = response.data.emails || []
       externalEmailTotal.value = response.data.pagination?.total || 0
@@ -1536,90 +1871,99 @@ const fetchAllExternalEmails = async () => {
     }
 
     // 桌面端：逐个邮箱本地收取
-    const res = await batchLoginAPI.getAccounts(1, 100)
-    const accountList = res.code === 0 ? (res.data?.accounts || []) : []
+    const res: any = await batchLoginAPI.getAllAccounts(100, {
+      suppressErrorMessage: true
+    })
+    const accountList = res.code === 0 ? res.data?.accounts || [] : []
     if (accountList.length === 0) {
       fetchingExternalEmails.value = false
       return
     }
+
+    showMessage('正在收取邮件...', 'primary', 0)
 
     let totalNew = 0
     let failCount = 0
 
     const friendlyError = (msg: string) => {
       if (!msg) return '收取失败'
-      if (msg.includes('Unsafe Login') || msg.includes('unsafe login')) return '登录被拒绝，请检查授权码或邮箱IMAP设置'
-      if (msg.includes('auth') || msg.includes('AUTH') || msg.includes('password') || msg.includes('授权')) return '授权码错误或已失效'
-      if (msg.includes('Connection') || msg.includes('connect') || msg.includes('timeout')) return '连接超时，请检查网络'
+      if (msg.includes('Unsafe Login') || msg.includes('unsafe login'))
+        return '登录被拒绝，请检查授权码或邮箱IMAP设置'
+      if (
+        msg.includes('auth') ||
+        msg.includes('AUTH') ||
+        msg.includes('password') ||
+        msg.includes('授权')
+      )
+        return '授权码错误或已失效'
+      if (msg.includes('Connection') || msg.includes('connect') || msg.includes('timeout'))
+        return '连接超时，请检查网络'
       if (msg.includes('Unable to parse')) return '服务器响应异常，请稍后重试'
       if (msg.length > 30) return msg.substring(0, 30) + '...'
       return msg
     }
     const token = localStorage.getItem('token') || ''
     const serverUrl = getServerUrl()
+    setExternalMailboxFetchingIds(accountList.map((account: any) => account.id))
 
-    for (const account of accountList) {
-      try {
-        if (account.auth_type === 'oauth2') {
-          // OAuth2 邮箱：先获取 token，再走本地 IMAP XOAUTH2
-          console.log('[ExternalFetch] desktop oauth2 local fetch start', {
-            mailboxId: account.id,
-            email: account.email,
-            provider: account.oauth_provider
-          })
-          const tokenRes = await batchLoginAPI.getOAuth2AccessToken(account.id)
-          if (tokenRes.code !== 0) {
-            throw new Error(tokenRes.message || '获取 token 失败')
+    const results = await runPromisePool<any, { success: boolean; newCount: number }>(
+      accountList,
+      EXTERNAL_FETCH_ALL_CONCURRENCY,
+      async (account: any) => {
+        try {
+          if (account.auth_type === 'oauth2') {
+            console.log('[ExternalFetch] desktop oauth2 local fetch start', {
+              mailboxId: account.id,
+              email: account.email,
+              provider: account.oauth_provider
+            })
+            const newCount = await fetchOAuthMailboxOnceById(tauriInvoke, account.id, {
+              account
+            })
+            console.log('[ExternalFetch] desktop oauth2 local fetch result', {
+              mailboxId: account.id,
+              email: account.email,
+              count: newCount
+            })
+            return { success: true, newCount }
           }
 
-          const { access_token: oauthAccessToken, imap_host, imap_port, email: oauthEmail } = tokenRes.data
+          const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
+          const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
 
-          const result = await tauriInvoke('fetch_emails', {
-            mailboxId: account.id,
-            email: oauthEmail,
-            password: '',
-            protocol: 'imap',
-            host: imap_host,
-            port: imap_port,
-            token,
-            serverUrl,
-            authType: 'oauth2',
-            accessToken: oauthAccessToken,
-          })
-
-          console.log('[ExternalFetch] desktop oauth2 local fetch result', {
+          const result: any = await tauriInvoke('fetch_emails', {
             mailboxId: account.id,
             email: account.email,
-            count: result.count
+            password: account.password,
+            protocol: account.protocol,
+            host: host || null,
+            port: port || null,
+            token,
+            serverUrl
           })
-
-          totalNew += result.count || 0
           await batchLoginAPI.updateMailboxStatus(account.id, 'active')
-          continue
+          return { success: true, newCount: Number(result.count || 0) }
+        } catch (e: any) {
+          console.error(`收取 ${account.email} 失败:`, e)
+          const rawMsg = normalizeOAuthRecoveryErrorMessage(
+            typeof e === 'string' ? e : e?.message || '收取失败'
+          )
+          await (batchLoginAPI as any).updateMailboxStatus(
+            account.id,
+            'failed',
+            friendlyError(rawMsg)
+          )
+          return { success: false, newCount: 0 }
+        } finally {
+          removeExternalMailboxFetchingIds([account.id])
         }
+      }
+    )
 
-        const host = account.protocol === 'imap' ? account.imap_host : account.pop3_host
-        const port = account.protocol === 'imap' ? account.imap_port : account.pop3_port
-
-        const result = await tauriInvoke('fetch_emails', {
-          mailboxId: account.id,
-          email: account.email,
-          password: account.password,
-          protocol: account.protocol,
-          host: host || null,
-          port: port || null,
-          token,
-          serverUrl
-        })
-        totalNew += result.count || 0
-        // 更新邮箱状态为正常
-        await batchLoginAPI.updateMailboxStatus(account.id, 'active')
-      } catch (e: any) {
-        console.error(`收取 ${account.email} 失败:`, e)
+    for (const result of results) {
+      totalNew += result.newCount || 0
+      if (!result.success) {
         failCount++
-        // 更新邮箱状态为失败，左侧显示红点
-        const rawMsg = typeof e === 'string' ? e : (e?.message || '收取失败')
-        await batchLoginAPI.updateMailboxStatus(account.id, 'failed', friendlyError(rawMsg))
       }
     }
 
@@ -1652,6 +1996,7 @@ const fetchAllExternalEmails = async () => {
     showMessage('收取失败: ' + (error.response?.data?.message || error.message), 'error')
   } finally {
     fetchingExternalEmails.value = false
+    clearExternalMailboxFetchingIds()
   }
 }
 
@@ -1720,7 +2065,13 @@ const handleSearchEmails = async (keyword: string) => {
   if (selectedMailboxId.value) {
     await mailStore.fetchMailboxEmails(selectedMailboxId.value, params)
   } else {
-    await mailStore.fetchUserEmails(1, 20, false, showOnlyUnread.value || undefined, keyword || undefined)
+    await mailStore.fetchUserEmails(
+      1,
+      20,
+      false,
+      showOnlyUnread.value || undefined,
+      keyword || undefined
+    )
   }
 }
 
@@ -1750,7 +2101,13 @@ const handlePageChange = async (page: number) => {
   if (selectedMailboxId.value) {
     await mailStore.fetchMailboxEmails(selectedMailboxId.value, params)
   } else {
-    await mailStore.fetchUserEmails(page, 20, false, showOnlyUnread.value || undefined, mailStore.searchKeyword || undefined)
+    await mailStore.fetchUserEmails(
+      page,
+      20,
+      false,
+      showOnlyUnread.value || undefined,
+      mailStore.searchKeyword || undefined
+    )
   }
 }
 
@@ -1782,7 +2139,7 @@ const confirmDeleteEmails = async () => {
   deleting.value = true
   try {
     const emailType = mailboxType.value === 'system' ? 'system' : 'external'
-    
+
     if (deletingBatch.value) {
       // 使用批量删除接口
       await unifiedAPI.batchDeleteEmails(deletingIds.value, emailType)
@@ -1795,7 +2152,7 @@ const confirmDeleteEmails = async () => {
         showMessage(result.data?.message || result.message || '删除失败', 'error')
       }
     }
-    
+
     // 如果删除的邮件包含当前选中的邮件，清空选中状态
     if (mailStore.selectedEmail && deletingIds.value.includes(mailStore.selectedEmail.id)) {
       mailStore.selectedEmail = null
@@ -1803,7 +2160,7 @@ const confirmDeleteEmails = async () => {
         selectedExternalEmailId.value = null
       }
     }
-    
+
     // 刷新当前页列表，保持页码不变
     if (emailType === 'system') {
       const params = {
@@ -1814,7 +2171,12 @@ const confirmDeleteEmails = async () => {
       if (selectedMailboxId.value) {
         await mailStore.fetchMailboxEmails(selectedMailboxId.value, params)
       } else {
-        await mailStore.fetchUserEmails(mailStore.currentPage, 20, false, showOnlyUnread.value || undefined)
+        await mailStore.fetchUserEmails(
+          mailStore.currentPage,
+          20,
+          false,
+          showOnlyUnread.value || undefined
+        )
       }
     } else {
       // 外部邮件：根据是否选中邮箱决定加载方式
@@ -1824,7 +2186,7 @@ const confirmDeleteEmails = async () => {
         await loadAllExternalEmails()
       }
     }
-    
+
     // 批量删除成功后，退出批量模式
     if (deletingBatch.value) {
       if (mailboxType.value === 'system') {
@@ -1856,10 +2218,10 @@ const copyVerificationCode = (code: string) => {
 const handleSelectEmail = async (email: any) => {
   // 先设置选中状态（显示基本信息）
   mailStore.selectEmail(email)
-  
+
   // 然后获取完整详情
   await mailStore.fetchEmailDetail(email.id)
-  
+
   // 标记已读
   if (!email.is_read) {
     await mailStore.markAsRead(email.id)

@@ -11,13 +11,17 @@ let messageTimeout: number | null = null
  * @param type 消息类型
  * @param duration 显示时长（毫秒），默认success为5秒，error为3秒
  */
-export const showMessage = (msg: string, type: 'success' | 'error' | 'info' | 'warning' = 'success', duration?: number) => {
+export const showMessage = (
+  msg: string,
+  type: 'success' | 'error' | 'info' | 'warning' | 'primary' = 'success',
+  duration?: number
+) => {
   // 清除之前的消息
   if (messageContainer) {
     document.body.removeChild(messageContainer)
     messageContainer = null
   }
-  
+
   if (messageTimeout) {
     clearTimeout(messageTimeout)
     messageTimeout = null
@@ -25,10 +29,16 @@ export const showMessage = (msg: string, type: 'success' | 'error' | 'info' | 'w
 
   // 创建消息容器
   messageContainer = document.createElement('div')
-  const colorClass = type === 'success' ? 'border-green-200 bg-green-50' : 
-                     type === 'error' ? 'border-red-200 bg-red-50' : 
-                     type === 'warning' ? 'border-yellow-200 bg-yellow-50' :
-                     'border-blue-200 bg-blue-50'
+  const colorClass =
+    type === 'success'
+      ? 'border-green-200 bg-green-50'
+      : type === 'error'
+        ? 'border-red-200 bg-red-50'
+        : type === 'warning'
+          ? 'border-yellow-200 bg-yellow-50'
+          : type === 'primary'
+            ? 'border-primary-200 bg-primary-50'
+            : 'border-blue-200 bg-blue-50'
   messageContainer.className = `fixed bottom-4 right-4 bg-white border border-gray-200 rounded-lg shadow-lg p-4 max-w-sm z-[9999] ${colorClass}`
 
   // 创建消息内容
@@ -37,23 +47,33 @@ export const showMessage = (msg: string, type: 'success' | 'error' | 'info' | 'w
 
   // 创建图标
   const icon = document.createElement('div')
-  const iconBg = type === 'success' ? 'bg-green-500' : 
-                 type === 'error' ? 'bg-red-500' : 
-                 type === 'warning' ? 'bg-yellow-500' :
-                 'bg-blue-500'
-  const iconText = type === 'success' ? '✓' : 
-                   type === 'error' ? '✕' : 
-                   type === 'warning' ? '!' :
-                   'i'
+  const iconBg =
+    type === 'success'
+      ? 'bg-green-500'
+      : type === 'error'
+        ? 'bg-red-500'
+        : type === 'warning'
+          ? 'bg-yellow-500'
+          : type === 'primary'
+            ? 'bg-primary-600'
+            : 'bg-blue-500'
+  const iconText =
+    type === 'success' ? '✓' : type === 'error' ? '✕' : type === 'warning' ? '!' : 'i'
   icon.className = `inline-flex items-center justify-center w-5 h-5 mr-2 rounded-full text-white text-xs font-bold ${iconBg}`
   icon.textContent = iconText
 
   // 创建文本
   const text = document.createElement('p')
-  const textColor = type === 'success' ? 'text-green-800' : 
-                    type === 'error' ? 'text-red-800' : 
-                    type === 'warning' ? 'text-yellow-800' :
-                    'text-blue-800'
+  const textColor =
+    type === 'success'
+      ? 'text-green-800'
+      : type === 'error'
+        ? 'text-red-800'
+        : type === 'warning'
+          ? 'text-yellow-800'
+          : type === 'primary'
+            ? 'text-primary-700'
+            : 'text-blue-800'
   text.className = `text-sm ${textColor}`
   text.textContent = msg
 
@@ -64,6 +84,11 @@ export const showMessage = (msg: string, type: 'success' | 'error' | 'info' | 'w
 
   // 添加到页面
   document.body.appendChild(messageContainer)
+
+  // duration=0 表示常驻，直到下一条消息替换
+  if (duration === 0) {
+    return
+  }
 
   // 设置自动消失（默认success为5秒，error为3秒）
   const defaultDuration = type === 'success' ? 5000 : 3000

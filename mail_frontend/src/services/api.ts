@@ -19,21 +19,12 @@ const isTauri = () => {
 const getBaseURL = () => {
   const tauriEnv = isTauri()
   const isDev = import.meta.env.DEV
-  
-  console.log('🔍 环境检测:', {
-    isTauri: tauriEnv,
-    isDev: isDev,
-    protocol: window.location.protocol,
-    hostname: window.location.hostname,
-    hasTauriGlobal: '__TAURI__' in window || '__TAURI_INTERNALS__' in window
-  })
 
   if (tauriEnv) {
     // Tauri 桌面端
     if (isDev) {
       // 开发模式：使用本地后端
       const localApi = 'http://localhost:8088/mail-api/v1'
-      console.log('🔧 Tauri 开发模式，使用本地 API:', localApi)
       return localApi
     } else {
       // 生产模式：使用线上服务器
@@ -109,15 +100,6 @@ api.interceptors.request.use(
       config.headers['Authorization'] = `Bearer ${token}`
     }
     
-    // 详细日志
-    console.log('📤 API 请求:', {
-      url: config.url,
-      baseURL: config.baseURL,
-      fullURL: `${config.baseURL}${config.url}`,
-      method: config.method,
-      hasToken: !!token
-    })
-    
     return config
   },
   (error) => {
@@ -148,25 +130,22 @@ api.interceptors.response.use(
     return data
   },
   (error) => {
-    console.log('🔴 API 错误详情:', {
-      url: error.config?.url,
-      baseURL: error.config?.baseURL,
-      status: error.response?.status,
-      statusText: error.response?.statusText,
-      hasToken: !!localStorage.getItem('token'),
-      errorMessage: error.message,
-      errorCode: error.code,
-      responseData: error.response?.data
-    })
-
     // 401错误不计入维护检测
     if (error.response?.status === 401) {
+      const authErrorMessage = error.response?.data?.detail === '账户已被禁用'
+        ? '账户已被禁用'
+        : '登录已过期，请重新登录'
+
+      if (error.response?.data?.detail === '账户已被禁用') {
+        sessionStorage.setItem('login_error_message', authErrorMessage)
+      }
+
       // 未授权，清除本地存储并跳转到登录页
       localStorage.removeItem('token')
       localStorage.removeItem('user')
       localStorage.removeItem('isAuthenticated')
 
-      showMessage('登录已过期，请重新登录', 'error')
+      showMessage(authErrorMessage, 'error')
 
       // 刷新页面并跳转到登录页
       setTimeout(() => {
@@ -177,7 +156,7 @@ api.interceptors.response.use(
         response: {
           data: {
             code: 1,
-            message: '未授权，请重新登录',
+            message: authErrorMessage,
             data: null
           }
         }
